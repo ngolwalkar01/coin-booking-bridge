@@ -17,6 +17,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		const VERSION           = '0.2.0';
 		const DB_VERSION        = '2026050801';
 		const OPTION_DB_VERSION = 'cbb_db_version';
+		const OPTION_SETTINGS   = 'cbb_zencoin_settings';
 
 		const TABLE_BUCKETS = 'cbb_zencoin_buckets';
 		const TABLE_LEDGER  = 'cbb_zencoin_ledger';
@@ -55,6 +56,8 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 
 			if ( is_admin() ) {
 				add_action( 'admin_notices', array( __CLASS__, 'maybe_dependency_notice' ) );
+				add_action( 'admin_menu', array( __CLASS__, 'register_admin_menu' ) );
+				add_action( 'admin_init', array( __CLASS__, 'register_settings' ) );
 				add_action( 'woocommerce_product_options_general_product_data', array( __CLASS__, 'render_product_fields' ) );
 				add_action( 'woocommerce_process_product_meta', array( __CLASS__, 'save_product_fields' ) );
 				add_action( 'woocommerce_product_after_variable_attributes', array( __CLASS__, 'render_variation_fields' ), 20, 3 );
@@ -185,6 +188,237 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			global $wpdb;
 
 			return $wpdb->prefix . self::TABLE_LEDGER;
+		}
+
+		/**
+		 * Register settings page.
+		 */
+		public static function register_admin_menu() {
+			add_submenu_page(
+				'woocommerce',
+				__( 'Zencoin Settings', 'coin-booking-bridge' ),
+				__( 'Zencoin Settings', 'coin-booking-bridge' ),
+				'manage_woocommerce',
+				'cbb-zencoin-settings',
+				array( __CLASS__, 'render_settings_page' )
+			);
+		}
+
+		/**
+		 * Register settings.
+		 */
+		public static function register_settings() {
+			register_setting(
+				'cbb_zencoin_settings',
+				self::OPTION_SETTINGS,
+				array(
+					'type'              => 'array',
+					'sanitize_callback' => array( __CLASS__, 'sanitize_settings' ),
+					'default'           => self::get_default_settings(),
+				)
+			);
+		}
+
+		/**
+		 * Get default Zencoin settings.
+		 *
+		 * @return array
+		 */
+		private static function get_default_settings() {
+			return array(
+				'coin_value_eur'                       => '5',
+				'standard_session_cost'                => '5',
+				'workshop_tier_a_cost'                 => '6',
+				'workshop_tier_b_cost'                 => '8',
+				'workshop_tier_c_cost'                 => '10',
+				'auto_calculate_booking_cost'          => 'yes',
+				'free_dropin_validity_days'            => '30',
+				'dropin_validity_days'                 => '90',
+				'package_small_validity_days'          => '90',
+				'package_medium_validity_days'         => '90',
+				'package_large_validity_days'          => '180',
+				'gift_card_validity_days'              => '1095',
+				'newsletter_discount_validity_days'    => '30',
+				'on_time_cancel_cutoff_hours'          => '12',
+				'wallet_freeze_on_subscription_on_hold' => 'yes',
+				'tera_wallet_mirror_enabled'           => 'yes',
+			);
+		}
+
+		/**
+		 * Get merged settings.
+		 *
+		 * @return array
+		 */
+		private static function get_settings() {
+			$settings = get_option( self::OPTION_SETTINGS, array() );
+
+			return wp_parse_args( is_array( $settings ) ? $settings : array(), self::get_default_settings() );
+		}
+
+		/**
+		 * Sanitize settings.
+		 *
+		 * @param array $settings Raw settings.
+		 * @return array
+		 */
+		public static function sanitize_settings( $settings ) {
+			$settings = is_array( $settings ) ? $settings : array();
+			$defaults = self::get_default_settings();
+			$clean    = array();
+
+			$decimal_fields = array(
+				'coin_value_eur',
+				'standard_session_cost',
+				'workshop_tier_a_cost',
+				'workshop_tier_b_cost',
+				'workshop_tier_c_cost',
+			);
+
+			$integer_fields = array(
+				'free_dropin_validity_days',
+				'dropin_validity_days',
+				'package_small_validity_days',
+				'package_medium_validity_days',
+				'package_large_validity_days',
+				'gift_card_validity_days',
+				'newsletter_discount_validity_days',
+				'on_time_cancel_cutoff_hours',
+			);
+
+			foreach ( $decimal_fields as $field ) {
+				$value           = isset( $settings[ $field ] ) ? self::sanitize_decimal_setting( wp_unslash( $settings[ $field ] ) ) : $defaults[ $field ];
+				$clean[ $field ] = max( 0, (float) $value );
+			}
+
+			foreach ( $integer_fields as $field ) {
+				$value           = isset( $settings[ $field ] ) ? absint( wp_unslash( $settings[ $field ] ) ) : (int) $defaults[ $field ];
+				$clean[ $field ] = max( 0, $value );
+			}
+
+			$clean['auto_calculate_booking_cost']           = ! empty( $settings['auto_calculate_booking_cost'] ) ? 'yes' : 'no';
+			$clean['wallet_freeze_on_subscription_on_hold'] = ! empty( $settings['wallet_freeze_on_subscription_on_hold'] ) ? 'yes' : 'no';
+			$clean['tera_wallet_mirror_enabled']            = ! empty( $settings['tera_wallet_mirror_enabled'] ) ? 'yes' : 'no';
+
+			return wp_parse_args( $clean, $defaults );
+		}
+
+		/**
+		 * Sanitize a decimal setting without requiring WooCommerce helpers.
+		 *
+		 * @param mixed $value Raw value.
+		 * @return string
+		 */
+		private static function sanitize_decimal_setting( $value ) {
+			if ( function_exists( 'wc_format_decimal' ) ) {
+				return wc_format_decimal( $value );
+			}
+
+			return preg_replace( '/[^0-9\.\-]/', '', (string) $value );
+		}
+
+		/**
+		 * Render settings page.
+		 */
+		public static function render_settings_page() {
+			if ( ! current_user_can( 'manage_woocommerce' ) ) {
+				return;
+			}
+
+			$settings = self::get_settings();
+			?>
+			<div class="wrap">
+				<h1><?php esc_html_e( 'Zencoin Settings', 'coin-booking-bridge' ); ?></h1>
+				<p><?php esc_html_e( 'Central Zencoin rules used by future package, drop-in, membership, gift-card, and booking flows. These settings are saved now but not yet applied to the current MVP debit/credit behavior.', 'coin-booking-bridge' ); ?></p>
+
+				<form method="post" action="options.php">
+					<?php settings_fields( 'cbb_zencoin_settings' ); ?>
+
+					<h2><?php esc_html_e( 'Pricing', 'coin-booking-bridge' ); ?></h2>
+					<table class="form-table" role="presentation">
+						<?php self::render_number_setting_row( 'coin_value_eur', __( 'EUR value per Zencoin', 'coin-booking-bridge' ), $settings, '0.01' ); ?>
+						<?php self::render_number_setting_row( 'standard_session_cost', __( 'Standard session cost (ZC)', 'coin-booking-bridge' ), $settings, '0.01' ); ?>
+						<?php self::render_number_setting_row( 'workshop_tier_a_cost', __( 'Workshop tier A cost (ZC)', 'coin-booking-bridge' ), $settings, '0.01' ); ?>
+						<?php self::render_number_setting_row( 'workshop_tier_b_cost', __( 'Workshop tier B cost (ZC)', 'coin-booking-bridge' ), $settings, '0.01' ); ?>
+						<?php self::render_number_setting_row( 'workshop_tier_c_cost', __( 'Workshop tier C cost (ZC)', 'coin-booking-bridge' ), $settings, '0.01' ); ?>
+						<?php self::render_checkbox_setting_row( 'auto_calculate_booking_cost', __( 'Auto-calculate booking ZC cost from product price', 'coin-booking-bridge' ), $settings ); ?>
+					</table>
+
+					<h2><?php esc_html_e( 'Validity', 'coin-booking-bridge' ); ?></h2>
+					<table class="form-table" role="presentation">
+						<?php self::render_number_setting_row( 'free_dropin_validity_days', __( 'Free drop-in validity (days)', 'coin-booking-bridge' ), $settings, '1' ); ?>
+						<?php self::render_number_setting_row( 'dropin_validity_days', __( 'Drop-in validity (days)', 'coin-booking-bridge' ), $settings, '1' ); ?>
+						<?php self::render_number_setting_row( 'package_small_validity_days', __( 'Small package validity (days)', 'coin-booking-bridge' ), $settings, '1' ); ?>
+						<?php self::render_number_setting_row( 'package_medium_validity_days', __( 'Medium package validity (days)', 'coin-booking-bridge' ), $settings, '1' ); ?>
+						<?php self::render_number_setting_row( 'package_large_validity_days', __( 'Large package validity (days)', 'coin-booking-bridge' ), $settings, '1' ); ?>
+						<?php self::render_number_setting_row( 'gift_card_validity_days', __( 'Gift card validity (days)', 'coin-booking-bridge' ), $settings, '1' ); ?>
+						<?php self::render_number_setting_row( 'newsletter_discount_validity_days', __( 'Newsletter discount validity (days)', 'coin-booking-bridge' ), $settings, '1' ); ?>
+					</table>
+
+					<h2><?php esc_html_e( 'Rules', 'coin-booking-bridge' ); ?></h2>
+					<table class="form-table" role="presentation">
+						<?php self::render_number_setting_row( 'on_time_cancel_cutoff_hours', __( 'On-time cancellation cutoff (hours)', 'coin-booking-bridge' ), $settings, '1' ); ?>
+						<?php self::render_checkbox_setting_row( 'wallet_freeze_on_subscription_on_hold', __( 'Freeze wallet when membership subscription is on-hold', 'coin-booking-bridge' ), $settings ); ?>
+						<?php self::render_checkbox_setting_row( 'tera_wallet_mirror_enabled', __( 'Mirror CBB balance changes to Tera Wallet', 'coin-booking-bridge' ), $settings ); ?>
+					</table>
+
+					<?php submit_button(); ?>
+				</form>
+			</div>
+			<?php
+		}
+
+		/**
+		 * Render number setting row.
+		 *
+		 * @param string $key      Setting key.
+		 * @param string $label    Field label.
+		 * @param array  $settings Settings.
+		 * @param string $step     Input step.
+		 */
+		private static function render_number_setting_row( $key, $label, $settings, $step ) {
+			?>
+			<tr>
+				<th scope="row"><label for="cbb_<?php echo esc_attr( $key ); ?>"><?php echo esc_html( $label ); ?></label></th>
+				<td>
+					<input
+						type="number"
+						id="cbb_<?php echo esc_attr( $key ); ?>"
+						name="<?php echo esc_attr( self::OPTION_SETTINGS ); ?>[<?php echo esc_attr( $key ); ?>]"
+						value="<?php echo esc_attr( $settings[ $key ] ); ?>"
+						min="0"
+						step="<?php echo esc_attr( $step ); ?>"
+						class="regular-text"
+					/>
+				</td>
+			</tr>
+			<?php
+		}
+
+		/**
+		 * Render checkbox setting row.
+		 *
+		 * @param string $key      Setting key.
+		 * @param string $label    Field label.
+		 * @param array  $settings Settings.
+		 */
+		private static function render_checkbox_setting_row( $key, $label, $settings ) {
+			?>
+			<tr>
+				<th scope="row"><?php echo esc_html( $label ); ?></th>
+				<td>
+					<label>
+						<input
+							type="checkbox"
+							name="<?php echo esc_attr( self::OPTION_SETTINGS ); ?>[<?php echo esc_attr( $key ); ?>]"
+							value="1"
+							<?php checked( 'yes', $settings[ $key ] ); ?>
+						/>
+						<?php esc_html_e( 'Enabled', 'coin-booking-bridge' ); ?>
+					</label>
+				</td>
+			</tr>
+			<?php
 		}
 
 		/**

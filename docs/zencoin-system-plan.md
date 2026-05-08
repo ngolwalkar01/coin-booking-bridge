@@ -706,6 +706,20 @@ Included:
 
 No runtime credit/debit behavior has been changed yet.
 
+### Milestone 0.2: Central Settings Skeleton
+
+Status: implemented in plugin version `0.2.0`.
+
+Included:
+
+- WooCommerce admin submenu: Zencoin Settings.
+- Central settings option: `cbb_zencoin_settings`.
+- Default ZC value and booking costs from client rules.
+- Validity settings for free drop-in, drop-in, packages, gift cards, and newsletter discounts.
+- Rule settings for on-time cancellation cutoff, on-hold wallet freeze, and Tera Wallet mirroring.
+
+These settings are saved but not yet applied to current booking/product behavior.
+
 ## Open Questions
 
 Answered:
