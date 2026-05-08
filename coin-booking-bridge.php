@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Coin Booking Bridge
  * Description: MVP bridge for WooCommerce Memberships, Subscriptions, Bookings, and Tera Wallet coin-based bookings.
- * Version: 0.1.2
+ * Version: 0.2.0
  * Author: Custom
  * Text Domain: coin-booking-bridge
  *
@@ -13,6 +13,13 @@ defined( 'ABSPATH' ) || exit;
 
 if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 	final class CBB_Coin_Booking_Bridge {
+
+		const VERSION           = '0.2.0';
+		const DB_VERSION        = '2026050801';
+		const OPTION_DB_VERSION = 'cbb_db_version';
+
+		const TABLE_BUCKETS = 'cbb_zencoin_buckets';
+		const TABLE_LEDGER  = 'cbb_zencoin_ledger';
 
 		const META_GRANT_AMOUNT     = '_cbb_coin_grant_amount';
 		const META_BOOKING_COST     = '_cbb_booking_coin_cost';
@@ -32,9 +39,20 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		}
 
 		/**
+		 * Plugin activation callback.
+		 */
+		public static function activate() {
+			self::install_schema();
+		}
+
+		/**
 		 * Register hooks once dependencies are available.
 		 */
 		public static function register_hooks() {
+			if ( is_admin() ) {
+				self::maybe_upgrade_schema();
+			}
+
 			if ( is_admin() ) {
 				add_action( 'admin_notices', array( __CLASS__, 'maybe_dependency_notice' ) );
 				add_action( 'woocommerce_product_options_general_product_data', array( __CLASS__, 'render_product_fields' ) );
@@ -65,6 +83,108 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			add_action( 'woocommerce_bookings_cancelled_booking', array( __CLASS__, 'refund_booking_coins' ), 20 );
 
 			add_filter( 'woocommerce_get_item_data', array( __CLASS__, 'display_cart_coin_cost' ), 20, 2 );
+		}
+
+		/**
+		 * Install or update custom Zencoin tables.
+		 */
+		private static function install_schema() {
+			global $wpdb;
+
+			require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+
+			$charset_collate = $wpdb->get_charset_collate();
+			$buckets_table   = self::get_buckets_table_name();
+			$ledger_table    = self::get_ledger_table_name();
+
+			$buckets_sql = "CREATE TABLE {$buckets_table} (
+				id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+				user_id bigint(20) unsigned NOT NULL,
+				source_type varchar(40) NOT NULL,
+				status varchar(20) NOT NULL DEFAULT 'active',
+				original_amount decimal(20,6) NOT NULL DEFAULT 0.000000,
+				remaining_amount decimal(20,6) NOT NULL DEFAULT 0.000000,
+				expires_at datetime DEFAULT NULL,
+				created_at datetime NOT NULL,
+				updated_at datetime NOT NULL,
+				related_order_id bigint(20) unsigned DEFAULT NULL,
+				related_order_item_id bigint(20) unsigned DEFAULT NULL,
+				related_product_id bigint(20) unsigned DEFAULT NULL,
+				related_subscription_id bigint(20) unsigned DEFAULT NULL,
+				related_booking_id bigint(20) unsigned DEFAULT NULL,
+				related_coupon_id bigint(20) unsigned DEFAULT NULL,
+				source_label varchar(120) DEFAULT NULL,
+				metadata longtext NULL,
+				PRIMARY KEY  (id),
+				KEY user_status_expiry (user_id,status,expires_at),
+				KEY source_type (source_type),
+				KEY related_order_id (related_order_id),
+				KEY related_subscription_id (related_subscription_id),
+				KEY related_booking_id (related_booking_id)
+			) {$charset_collate};";
+
+			$ledger_sql = "CREATE TABLE {$ledger_table} (
+				id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+				user_id bigint(20) unsigned NOT NULL,
+				bucket_id bigint(20) unsigned DEFAULT NULL,
+				entry_type varchar(40) NOT NULL,
+				direction varchar(10) NOT NULL,
+				amount decimal(20,6) NOT NULL DEFAULT 0.000000,
+				balance_after decimal(20,6) DEFAULT NULL,
+				label varchar(160) NOT NULL,
+				created_at datetime NOT NULL,
+				related_order_id bigint(20) unsigned DEFAULT NULL,
+				related_order_item_id bigint(20) unsigned DEFAULT NULL,
+				related_product_id bigint(20) unsigned DEFAULT NULL,
+				related_subscription_id bigint(20) unsigned DEFAULT NULL,
+				related_booking_id bigint(20) unsigned DEFAULT NULL,
+				related_coupon_id bigint(20) unsigned DEFAULT NULL,
+				metadata longtext NULL,
+				PRIMARY KEY  (id),
+				KEY user_created (user_id,created_at),
+				KEY bucket_id (bucket_id),
+				KEY entry_type (entry_type),
+				KEY related_order_id (related_order_id),
+				KEY related_booking_id (related_booking_id)
+			) {$charset_collate};";
+
+			dbDelta( $buckets_sql );
+			dbDelta( $ledger_sql );
+
+			update_option( self::OPTION_DB_VERSION, self::DB_VERSION );
+		}
+
+		/**
+		 * Update schema if plugin files are newer than installed DB version.
+		 */
+		private static function maybe_upgrade_schema() {
+			if ( get_option( self::OPTION_DB_VERSION ) === self::DB_VERSION ) {
+				return;
+			}
+
+			self::install_schema();
+		}
+
+		/**
+		 * Get buckets table name.
+		 *
+		 * @return string
+		 */
+		private static function get_buckets_table_name() {
+			global $wpdb;
+
+			return $wpdb->prefix . self::TABLE_BUCKETS;
+		}
+
+		/**
+		 * Get ledger table name.
+		 *
+		 * @return string
+		 */
+		private static function get_ledger_table_name() {
+			global $wpdb;
+
+			return $wpdb->prefix . self::TABLE_LEDGER;
 		}
 
 		/**
@@ -754,5 +874,6 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		}
 	}
 
+	register_activation_hook( __FILE__, array( 'CBB_Coin_Booking_Bridge', 'activate' ) );
 	CBB_Coin_Booking_Bridge::init();
 }

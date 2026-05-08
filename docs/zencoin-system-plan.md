@@ -689,6 +689,23 @@ Implementation order:
 
 Only after Milestone 0 is stable should we move current subscription/package/drop-in granting into the new bucket system.
 
+## Implementation Progress
+
+### Milestone 0.1: Schema Foundation
+
+Status: implemented in plugin version `0.2.0`.
+
+Included:
+
+- Plugin DB version constant.
+- Activation hook.
+- Buckets table creation.
+- Ledger table creation.
+- Installed DB version option.
+- Lazy admin-side schema upgrade if plugin files are newer than installed DB version.
+
+No runtime credit/debit behavior has been changed yet.
+
 ## Open Questions
 
 Answered:
