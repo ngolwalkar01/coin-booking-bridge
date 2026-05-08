@@ -720,6 +720,19 @@ Included:
 
 These settings are saved but not yet applied to current booking/product behavior.
 
+### Milestone 0.3: Admin System Status Panel
+
+Status: implemented in plugin version `0.2.0`.
+
+Included:
+
+- Read-only system status panel on WooCommerce > Zencoin Settings.
+- Plugin version display.
+- Installed DB version display.
+- Bucket table readiness check.
+- Ledger table readiness check.
+- Runtime note confirming current MVP credit/debit behavior is still active.
+
 ## Open Questions
 
 Answered:

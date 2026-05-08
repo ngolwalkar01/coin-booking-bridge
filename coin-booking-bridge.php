@@ -331,6 +331,8 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				<h1><?php esc_html_e( 'Zencoin Settings', 'coin-booking-bridge' ); ?></h1>
 				<p><?php esc_html_e( 'Central Zencoin rules used by future package, drop-in, membership, gift-card, and booking flows. These settings are saved now but not yet applied to the current MVP debit/credit behavior.', 'coin-booking-bridge' ); ?></p>
 
+				<?php self::render_system_status_panel(); ?>
+
 				<form method="post" action="options.php">
 					<?php settings_fields( 'cbb_zencoin_settings' ); ?>
 
@@ -366,6 +368,61 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				</form>
 			</div>
 			<?php
+		}
+
+		/**
+		 * Render system status panel.
+		 */
+		private static function render_system_status_panel() {
+			$db_version     = get_option( self::OPTION_DB_VERSION, '' );
+			$buckets_table  = self::get_buckets_table_name();
+			$ledger_table   = self::get_ledger_table_name();
+			$buckets_exists = self::table_exists( $buckets_table );
+			$ledger_exists  = self::table_exists( $ledger_table );
+			?>
+			<h2><?php esc_html_e( 'System Status', 'coin-booking-bridge' ); ?></h2>
+			<table class="widefat striped" style="max-width: 900px; margin-bottom: 24px;">
+				<tbody>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Plugin version', 'coin-booking-bridge' ); ?></th>
+						<td><?php echo esc_html( self::VERSION ); ?></td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Installed DB version', 'coin-booking-bridge' ); ?></th>
+						<td>
+							<?php echo esc_html( $db_version ? $db_version : __( 'Not installed', 'coin-booking-bridge' ) ); ?>
+							<?php if ( $db_version !== self::DB_VERSION ) : ?>
+								<span style="color: #b32d2e;"><?php esc_html_e( 'Update needed', 'coin-booking-bridge' ); ?></span>
+							<?php endif; ?>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><?php echo esc_html( $buckets_table ); ?></th>
+						<td><?php echo $buckets_exists ? esc_html__( 'Ready', 'coin-booking-bridge' ) : esc_html__( 'Missing', 'coin-booking-bridge' ); ?></td>
+					</tr>
+					<tr>
+						<th scope="row"><?php echo esc_html( $ledger_table ); ?></th>
+						<td><?php echo $ledger_exists ? esc_html__( 'Ready', 'coin-booking-bridge' ) : esc_html__( 'Missing', 'coin-booking-bridge' ); ?></td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Runtime mode', 'coin-booking-bridge' ); ?></th>
+						<td><?php esc_html_e( 'Current MVP credit/debit behavior is still active. Bucket and ledger tables are prepared but not yet used for live transactions.', 'coin-booking-bridge' ); ?></td>
+					</tr>
+				</tbody>
+			</table>
+			<?php
+		}
+
+		/**
+		 * Check whether a DB table exists.
+		 *
+		 * @param string $table_name Table name.
+		 * @return bool
+		 */
+		private static function table_exists( $table_name ) {
+			global $wpdb;
+
+			return $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table_name ) ) === $table_name;
 		}
 
 		/**
