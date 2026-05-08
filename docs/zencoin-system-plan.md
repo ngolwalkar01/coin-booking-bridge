@@ -748,6 +748,20 @@ Included:
 
 These fields save product meta only. They do not grant Zencoin buckets yet.
 
+### Milestone 0.5: Bucket and Ledger Service Helpers
+
+Status: implemented in plugin version `0.2.0`.
+
+Included:
+
+- Helper to create Zencoin bucket records.
+- Helper to add append-only ledger entries.
+- Helper to calculate active bucket balance for a user.
+- Utility sanitizers for nullable IDs, datetime values, metadata, ledger direction, and ZC amount formatting.
+- System Status panel row counts for buckets and ledger entries.
+
+These helpers are prepared for upcoming grant/debit/refund flows. Current MVP transactions do not call them yet.
+
 ## Open Questions
 
 Answered:

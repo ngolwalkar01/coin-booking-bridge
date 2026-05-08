@@ -406,10 +406,22 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 						<th scope="row"><?php echo esc_html( $buckets_table ); ?></th>
 						<td><?php echo $buckets_exists ? esc_html__( 'Ready', 'coin-booking-bridge' ) : esc_html__( 'Missing', 'coin-booking-bridge' ); ?></td>
 					</tr>
+					<?php if ( $buckets_exists ) : ?>
+						<tr>
+							<th scope="row"><?php esc_html_e( 'Bucket records', 'coin-booking-bridge' ); ?></th>
+							<td><?php echo esc_html( number_format_i18n( self::get_table_row_count( $buckets_table ) ) ); ?></td>
+						</tr>
+					<?php endif; ?>
 					<tr>
 						<th scope="row"><?php echo esc_html( $ledger_table ); ?></th>
 						<td><?php echo $ledger_exists ? esc_html__( 'Ready', 'coin-booking-bridge' ) : esc_html__( 'Missing', 'coin-booking-bridge' ); ?></td>
 					</tr>
+					<?php if ( $ledger_exists ) : ?>
+						<tr>
+							<th scope="row"><?php esc_html_e( 'Ledger entries', 'coin-booking-bridge' ); ?></th>
+							<td><?php echo esc_html( number_format_i18n( self::get_table_row_count( $ledger_table ) ) ); ?></td>
+						</tr>
+					<?php endif; ?>
 					<tr>
 						<th scope="row"><?php esc_html_e( 'Runtime mode', 'coin-booking-bridge' ); ?></th>
 						<td><?php esc_html_e( 'Current MVP credit/debit behavior is still active. Bucket and ledger tables are prepared but not yet used for live transactions.', 'coin-booking-bridge' ); ?></td>
@@ -429,6 +441,242 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			global $wpdb;
 
 			return $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table_name ) ) === $table_name;
+		}
+
+		/**
+		 * Get table row count for diagnostics.
+		 *
+		 * @param string $table_name Table name.
+		 * @return int
+		 */
+		private static function get_table_row_count( $table_name ) {
+			global $wpdb;
+
+			if ( ! self::table_exists( $table_name ) ) {
+				return 0;
+			}
+
+			return (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table_name}" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		}
+
+		/**
+		 * Create a Zencoin bucket.
+		 *
+		 * This helper is prepared for upcoming grant flows. Current MVP transactions do not call it yet.
+		 *
+		 * @param int   $user_id User ID.
+		 * @param float $amount  ZC amount.
+		 * @param array $args    Bucket args.
+		 * @return int|false Bucket ID on success, false on failure.
+		 */
+		public static function create_zencoin_bucket( $user_id, $amount, $args = array() ) {
+			global $wpdb;
+
+			$user_id = absint( $user_id );
+			$amount  = (float) $amount;
+
+			if ( $user_id <= 0 || $amount <= 0 ) {
+				return false;
+			}
+
+			$defaults = array(
+				'source_type'             => 'manual',
+				'status'                  => 'active',
+				'expires_at'              => null,
+				'related_order_id'        => null,
+				'related_order_item_id'   => null,
+				'related_product_id'      => null,
+				'related_subscription_id' => null,
+				'related_booking_id'      => null,
+				'related_coupon_id'       => null,
+				'source_label'            => '',
+				'metadata'                => array(),
+			);
+			$args     = wp_parse_args( $args, $defaults );
+			$now      = current_time( 'mysql' );
+
+			$inserted = $wpdb->insert(
+				self::get_buckets_table_name(),
+				array(
+					'user_id'                 => $user_id,
+					'source_type'             => sanitize_key( $args['source_type'] ),
+					'status'                  => sanitize_key( $args['status'] ),
+					'original_amount'         => self::format_zencoin_amount( $amount ),
+					'remaining_amount'        => self::format_zencoin_amount( $amount ),
+					'expires_at'              => self::sanitize_datetime_or_null( $args['expires_at'] ),
+					'created_at'              => $now,
+					'updated_at'              => $now,
+					'related_order_id'        => self::nullable_absint( $args['related_order_id'] ),
+					'related_order_item_id'   => self::nullable_absint( $args['related_order_item_id'] ),
+					'related_product_id'      => self::nullable_absint( $args['related_product_id'] ),
+					'related_subscription_id' => self::nullable_absint( $args['related_subscription_id'] ),
+					'related_booking_id'      => self::nullable_absint( $args['related_booking_id'] ),
+					'related_coupon_id'       => self::nullable_absint( $args['related_coupon_id'] ),
+					'source_label'            => sanitize_text_field( $args['source_label'] ),
+					'metadata'                => self::encode_metadata( $args['metadata'] ),
+				),
+				array( '%d', '%s', '%s', '%f', '%f', '%s', '%s', '%s', '%d', '%d', '%d', '%d', '%d', '%d', '%s', '%s' )
+			);
+
+			return $inserted ? (int) $wpdb->insert_id : false;
+		}
+
+		/**
+		 * Add an append-only Zencoin ledger entry.
+		 *
+		 * This helper is prepared for upcoming grant/debit/refund flows. Current MVP transactions do not call it yet.
+		 *
+		 * @param int   $user_id User ID.
+		 * @param float $amount  ZC amount.
+		 * @param array $args    Ledger args.
+		 * @return int|false Ledger entry ID on success, false on failure.
+		 */
+		public static function add_zencoin_ledger_entry( $user_id, $amount, $args = array() ) {
+			global $wpdb;
+
+			$user_id = absint( $user_id );
+			$amount  = (float) $amount;
+
+			if ( $user_id <= 0 || $amount <= 0 ) {
+				return false;
+			}
+
+			$defaults = array(
+				'bucket_id'               => null,
+				'entry_type'              => 'manual_adjustment',
+				'direction'               => 'credit',
+				'balance_after'           => null,
+				'label'                   => __( 'Manual adjustment', 'coin-booking-bridge' ),
+				'related_order_id'        => null,
+				'related_order_item_id'   => null,
+				'related_product_id'      => null,
+				'related_subscription_id' => null,
+				'related_booking_id'      => null,
+				'related_coupon_id'       => null,
+				'metadata'                => array(),
+			);
+			$args     = wp_parse_args( $args, $defaults );
+			$inserted = $wpdb->insert(
+				self::get_ledger_table_name(),
+				array(
+					'user_id'                 => $user_id,
+					'bucket_id'               => self::nullable_absint( $args['bucket_id'] ),
+					'entry_type'              => sanitize_key( $args['entry_type'] ),
+					'direction'               => self::sanitize_ledger_direction( $args['direction'] ),
+					'amount'                  => self::format_zencoin_amount( $amount ),
+					'balance_after'           => null === $args['balance_after'] ? null : self::format_zencoin_amount( $args['balance_after'] ),
+					'label'                   => sanitize_text_field( $args['label'] ),
+					'created_at'              => current_time( 'mysql' ),
+					'related_order_id'        => self::nullable_absint( $args['related_order_id'] ),
+					'related_order_item_id'   => self::nullable_absint( $args['related_order_item_id'] ),
+					'related_product_id'      => self::nullable_absint( $args['related_product_id'] ),
+					'related_subscription_id' => self::nullable_absint( $args['related_subscription_id'] ),
+					'related_booking_id'      => self::nullable_absint( $args['related_booking_id'] ),
+					'related_coupon_id'       => self::nullable_absint( $args['related_coupon_id'] ),
+					'metadata'                => self::encode_metadata( $args['metadata'] ),
+				),
+				array( '%d', '%d', '%s', '%s', '%f', '%f', '%s', '%s', '%d', '%d', '%d', '%d', '%d', '%d', '%s' )
+			);
+
+			return $inserted ? (int) $wpdb->insert_id : false;
+		}
+
+		/**
+		 * Get active bucket balance for a user.
+		 *
+		 * @param int $user_id User ID.
+		 * @return float
+		 */
+		public static function get_zencoin_bucket_balance( $user_id ) {
+			global $wpdb;
+
+			$user_id = absint( $user_id );
+			if ( $user_id <= 0 ) {
+				return 0.0;
+			}
+
+			$table = self::get_buckets_table_name();
+
+			if ( ! self::table_exists( $table ) ) {
+				return 0.0;
+			}
+
+			$now = current_time( 'mysql' );
+
+			return (float) $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT COALESCE(SUM(remaining_amount), 0) FROM {$table} WHERE user_id = %d AND status = %s AND remaining_amount > 0 AND (expires_at IS NULL OR expires_at > %s)", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					$user_id,
+					'active',
+					$now
+				)
+			);
+		}
+
+		/**
+		 * Sanitize nullable integer.
+		 *
+		 * @param mixed $value Value.
+		 * @return int|null
+		 */
+		private static function nullable_absint( $value ) {
+			if ( null === $value || '' === $value ) {
+				return null;
+			}
+
+			$value = absint( $value );
+
+			return $value > 0 ? $value : null;
+		}
+
+		/**
+		 * Format a Zencoin amount for DB storage.
+		 *
+		 * @param mixed $amount Amount.
+		 * @return string
+		 */
+		private static function format_zencoin_amount( $amount ) {
+			return number_format( (float) $amount, 6, '.', '' );
+		}
+
+		/**
+		 * Sanitize datetime value or return null.
+		 *
+		 * @param mixed $value Datetime value.
+		 * @return string|null
+		 */
+		private static function sanitize_datetime_or_null( $value ) {
+			if ( empty( $value ) ) {
+				return null;
+			}
+
+			$timestamp = strtotime( (string) $value );
+
+			return $timestamp ? gmdate( 'Y-m-d H:i:s', $timestamp ) : null;
+		}
+
+		/**
+		 * Encode metadata for storage.
+		 *
+		 * @param mixed $metadata Metadata.
+		 * @return string|null
+		 */
+		private static function encode_metadata( $metadata ) {
+			if ( empty( $metadata ) ) {
+				return null;
+			}
+
+			return wp_json_encode( $metadata );
+		}
+
+		/**
+		 * Sanitize ledger direction.
+		 *
+		 * @param string $direction Direction.
+		 * @return string
+		 */
+		private static function sanitize_ledger_direction( $direction ) {
+			return in_array( $direction, array( 'credit', 'debit' ), true ) ? $direction : 'credit';
 		}
 
 		/**
