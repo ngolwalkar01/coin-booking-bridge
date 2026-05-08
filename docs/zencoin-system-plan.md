@@ -299,8 +299,8 @@ Client drop-ins:
 
 Free trial identity MVP:
 
-- Enforce by user account.
-- Also store normalized email and phone hash if available.
+- Enforce by normalized email and phone for now.
+- User account ID may also be stored for reporting, but eligibility should not rely only on account ID.
 - Longer-term: add stronger duplicate detection using verified phone/payment identity.
 
 ### Gift Cards
@@ -311,6 +311,12 @@ Recommended final approach:
 - Do not use gift cards as checkout discount for ZC bookings.
 - Redeem gift card in the Zencoin wallet area.
 - CBB validates code, converts euro value to ZC, creates gift-card bucket, and marks/records redemption.
+
+Current decision:
+
+- Woo Smart Coupons is not installed yet.
+- Gift-card work is not needed for Milestone 0/1 unless we decide to pull gift cards into the first release.
+- Before Milestone 7 starts, install Smart Coupons or choose a custom CBB voucher-code system.
 
 Conversion:
 
@@ -451,6 +457,12 @@ Final wallet UI should show:
 - Optional invoices link/list from account area.
 
 Tera Wallet UI may need to be hidden or replaced if it cannot match the final design and bucket activity requirements.
+
+Current decision:
+
+- Hide Tera Wallet UI in favor of a custom CBB wallet screen.
+- Tera Wallet may remain installed as a balance mirror/compatibility layer, but customer-facing wallet screens should be rendered by CBB.
+- CBB wallet UI must be design-driven and override/replace the generic wallet experience.
 
 ## Admin UI
 
@@ -679,9 +691,14 @@ Only after Milestone 0 is stable should we move current subscription/package/dro
 
 ## Open Questions
 
-1. How should free trial identity be enforced beyond account/email/phone for MVP?
-2. Is Woo Smart Coupons already installed on the target site?
-3. Should Tera Wallet UI be hidden in favor of a custom CBB wallet screen?
-4. For workshops/events, should the final behavior always be "buy missing amount only", even when missing 3+ ZC?
-5. What is the exact active-member price per ZC source: subscription product price divided by monthly ZC grant, or a manually configured plan rate?
-6. Which booking statuses represent "studio cancelled" in the actual Woo Bookings setup?
+Answered:
+
+1. Free trial identity should be enforced by normalized email and phone for now.
+2. Woo Smart Coupons is not installed yet. It is only needed once gift-card work begins, unless gift cards move into an earlier milestone.
+3. Tera Wallet UI should be hidden in favor of a custom CBB wallet screen. CBB UI will own the customer-facing wallet experience.
+
+Pending:
+
+1. For workshops/events, should the final behavior always be "buy missing amount only", even when missing 3+ ZC?
+2. What is the exact active-member price per ZC source: subscription product price divided by monthly ZC grant, or a manually configured plan rate?
+3. Which booking statuses represent "studio cancelled" in the actual Woo Bookings setup?
