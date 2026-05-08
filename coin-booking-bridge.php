@@ -88,7 +88,9 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			add_action( 'woocommerce_checkout_process', array( __CLASS__, 'validate_free_dropin_trial_checkout' ), 20 );
 			add_action( 'woocommerce_store_api_checkout_update_order_from_request', array( __CLASS__, 'validate_free_dropin_trial_store_api_checkout' ), 20, 2 );
 
-			add_action( 'woocommerce_before_calculate_totals', array( __CLASS__, 'zero_coin_booking_prices' ), 20 );
+			add_filter( 'woocommerce_add_cart_item', array( __CLASS__, 'zero_coin_booking_cart_item_price' ), 999, 1 );
+			add_filter( 'woocommerce_get_cart_item_from_session', array( __CLASS__, 'zero_coin_booking_session_item_price' ), 999, 3 );
+			add_action( 'woocommerce_before_calculate_totals', array( __CLASS__, 'zero_coin_booking_prices' ), 999 );
 			add_action( 'woocommerce_check_cart_items', array( __CLASS__, 'validate_cart_coin_balance' ), 20 );
 			add_action( 'woocommerce_after_checkout_validation', array( __CLASS__, 'validate_checkout_coin_balance' ), 20, 2 );
 			add_action( 'woocommerce_checkout_create_order_line_item', array( __CLASS__, 'store_order_item_coin_cost' ), 20, 4 );
@@ -1813,11 +1815,38 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				return;
 			}
 
-			foreach ( $cart->get_cart() as $cart_item ) {
-				if ( self::is_coin_booking_cart_item( $cart_item ) ) {
-					$cart_item['data']->set_price( 0 );
-				}
+			foreach ( $cart->get_cart() as $cart_item_key => $cart_item ) {
+				$cart->cart_contents[ $cart_item_key ] = self::zero_coin_booking_cart_item_price( $cart_item );
 			}
+		}
+
+		/**
+		 * Keep coin-paid bookings at zero money price when cart items are created.
+		 *
+		 * WooCommerce Bookings applies its calculated booking cost to the cart item
+		 * when items are added/restored, so this runs after that booking filter.
+		 *
+		 * @param array $cart_item Cart item.
+		 * @return array
+		 */
+		public static function zero_coin_booking_cart_item_price( $cart_item ) {
+			if ( self::is_coin_booking_cart_item( $cart_item ) && ! empty( $cart_item['data'] ) && is_object( $cart_item['data'] ) ) {
+				$cart_item['data']->set_price( 0 );
+			}
+
+			return $cart_item;
+		}
+
+		/**
+		 * Keep restored session bookings at zero money price.
+		 *
+		 * @param array  $cart_item     Cart item.
+		 * @param array  $values        Session values.
+		 * @param string $cart_item_key Cart item key.
+		 * @return array
+		 */
+		public static function zero_coin_booking_session_item_price( $cart_item, $values, $cart_item_key ) {
+			return self::zero_coin_booking_cart_item_price( $cart_item );
 		}
 
 		/**
@@ -2145,6 +2174,11 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		 */
 		private static function get_cart_item_coin_cost( $cart_item ) {
 			$product_id = ! empty( $cart_item['product_id'] ) ? (int) $cart_item['product_id'] : 0;
+
+			if ( ! $product_id && ! empty( $cart_item['data'] ) && is_object( $cart_item['data'] ) && method_exists( $cart_item['data'], 'get_id' ) ) {
+				$product_id = (int) $cart_item['data']->get_id();
+			}
+
 			$cost       = $product_id ? (float) get_post_meta( $product_id, self::META_BOOKING_COST, true ) : 0.0;
 			$quantity   = isset( $cart_item['quantity'] ) ? max( 1, (float) $cart_item['quantity'] ) : 1;
 
@@ -2158,7 +2192,29 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		 * @return bool
 		 */
 		private static function is_coin_booking_cart_item( $cart_item ) {
-			return ! empty( $cart_item['booking'] ) && self::get_cart_item_coin_cost( $cart_item ) > 0;
+			if ( self::get_cart_item_coin_cost( $cart_item ) <= 0 ) {
+				return false;
+			}
+
+			if ( ! empty( $cart_item['booking'] ) ) {
+				return true;
+			}
+
+			$product = ! empty( $cart_item['data'] ) && is_object( $cart_item['data'] ) ? $cart_item['data'] : null;
+
+			if ( ! $product ) {
+				return false;
+			}
+
+			if ( function_exists( 'is_wc_booking_product' ) && is_wc_booking_product( $product ) ) {
+				return true;
+			}
+
+			if ( method_exists( $product, 'is_type' ) && $product->is_type( 'booking' ) ) {
+				return true;
+			}
+
+			return is_a( $product, 'WC_Product_Booking' );
 		}
 
 		/**
