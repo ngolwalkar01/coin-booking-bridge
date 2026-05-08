@@ -762,6 +762,26 @@ Included:
 
 These helpers are prepared for upcoming grant/debit/refund flows. Current MVP transactions do not call them yet.
 
+### Milestone 1.1: Package and Drop-In Paid Order Grants
+
+Status: implemented in plugin version `0.2.0`.
+
+Included:
+
+- Paid WooCommerce orders can create Zencoin buckets for configured `Package` products.
+- Paid WooCommerce orders can create Zencoin buckets for configured `Drop-in` products.
+- Grant creates an append-only ledger credit entry.
+- Grant can mirror the credit to Tera Wallet when the central setting is enabled.
+- Order stores `_cbb_zencoin_product_grants` to prevent duplicate grants.
+- Existing subscription and booking MVP behavior remains active.
+
+Not included yet:
+
+- Free drop-in one-time eligibility enforcement.
+- Gift card redemption.
+- Auto top-up.
+- Bucket-aware booking debit.
+
 ## Open Questions
 
 Answered:

@@ -32,6 +32,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		const META_ONE_TIME_PERSON  = '_cbb_zencoin_one_time_per_person';
 		const META_PACKAGE_SIZE     = '_cbb_zencoin_package_size';
 		const META_CREDIT_TXN       = '_cbb_coins_credited_transaction_id';
+		const META_PRODUCT_GRANTS   = '_cbb_zencoin_product_grants';
 		const META_DEBIT_TXN        = '_cbb_coins_debited_transaction_id';
 		const META_REFUND_TXN       = '_cbb_coins_refunded_transaction_id';
 		const META_COIN_TOTAL       = '_cbb_coin_total';
@@ -76,6 +77,9 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 
 			add_action( 'woocommerce_subscription_payment_complete', array( __CLASS__, 'credit_subscription_coins' ), 20, 1 );
 			add_action( 'woocommerce_subscription_renewal_payment_complete', array( __CLASS__, 'credit_subscription_renewal_coins' ), 20, 2 );
+			add_action( 'woocommerce_payment_complete', array( __CLASS__, 'grant_order_product_zencoins' ), 20, 1 );
+			add_action( 'woocommerce_order_status_processing', array( __CLASS__, 'grant_order_product_zencoins' ), 20, 1 );
+			add_action( 'woocommerce_order_status_completed', array( __CLASS__, 'grant_order_product_zencoins' ), 20, 1 );
 
 			add_action( 'woocommerce_before_calculate_totals', array( __CLASS__, 'zero_coin_booking_prices' ), 20 );
 			add_action( 'woocommerce_check_cart_items', array( __CLASS__, 'validate_cart_coin_balance' ), 20 );
@@ -997,6 +1001,249 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		 */
 		public static function credit_subscription_renewal_coins( $subscription, $last_order ) {
 			self::credit_coins_for_order( $subscription, $last_order );
+		}
+
+		/**
+		 * Grant Zencoins for paid package/drop-in products.
+		 *
+		 * @param int|WC_Order $order_id Order ID or object.
+		 */
+		public static function grant_order_product_zencoins( $order_id ) {
+			$order = $order_id instanceof WC_Order ? $order_id : wc_get_order( $order_id );
+
+			if ( ! $order || $order->get_meta( self::META_PRODUCT_GRANTS, true ) ) {
+				return;
+			}
+
+			$user_id = (int) $order->get_customer_id();
+
+			if ( $user_id <= 0 ) {
+				return;
+			}
+
+			$grants = array();
+
+			foreach ( $order->get_items( 'line_item' ) as $item_id => $item ) {
+				$grant = self::get_product_grant_for_order_item( $item );
+
+				if ( ! $grant ) {
+					continue;
+				}
+
+				$amount = $grant['amount'] * max( 1, (float) $item->get_quantity() );
+
+				if ( $amount <= 0 ) {
+					continue;
+				}
+
+				$bucket_id = self::create_zencoin_bucket(
+					$user_id,
+					$amount,
+					array(
+						'source_type'           => $grant['product_type'],
+						'expires_at'            => self::calculate_expiry_datetime( $grant['validity_days'], $order->get_date_paid() ),
+						'related_order_id'      => $order->get_id(),
+						'related_order_item_id' => $item_id,
+						'related_product_id'    => $grant['product_id'],
+						'source_label'          => $grant['source_label'],
+						'metadata'              => array(
+							'order_number' => $order->get_order_number(),
+							'product_name'  => $item->get_name(),
+							'package_size'  => $grant['package_size'],
+						),
+					)
+				);
+
+				if ( ! $bucket_id ) {
+					$order->add_order_note( __( 'Zencoin bucket grant failed for a package/drop-in line item.', 'coin-booking-bridge' ) );
+					continue;
+				}
+
+				$ledger_id = self::add_zencoin_ledger_entry(
+					$user_id,
+					$amount,
+					array(
+						'bucket_id'             => $bucket_id,
+						'entry_type'            => self::get_grant_ledger_type( $grant['product_type'] ),
+						'direction'             => 'credit',
+						'balance_after'         => self::get_zencoin_bucket_balance( $user_id ),
+						'label'                 => $grant['source_label'],
+						'related_order_id'      => $order->get_id(),
+						'related_order_item_id' => $item_id,
+						'related_product_id'    => $grant['product_id'],
+					)
+				);
+
+				$wallet_transaction_id = self::mirror_wallet_credit(
+					$user_id,
+					$amount,
+					sprintf(
+						/* translators: 1: source label, 2: order number */
+						__( '%1$s from order #%2$s', 'coin-booking-bridge' ),
+						$grant['source_label'],
+						$order->get_order_number()
+					),
+					$order->get_currency( 'edit' )
+				);
+
+				$grants[] = array(
+					'item_id'               => $item_id,
+					'product_id'            => $grant['product_id'],
+					'product_type'          => $grant['product_type'],
+					'amount'                => self::format_zencoin_amount( $amount ),
+					'bucket_id'             => $bucket_id,
+					'ledger_id'             => $ledger_id,
+					'wallet_transaction_id' => $wallet_transaction_id,
+				);
+			}
+
+			if ( empty( $grants ) ) {
+				return;
+			}
+
+			$order->update_meta_data( self::META_PRODUCT_GRANTS, $grants );
+			$order->add_order_note(
+				sprintf(
+					/* translators: %s: coin amount */
+					__( 'Created Zencoin bucket grants for %s ZC.', 'coin-booking-bridge' ),
+					wc_format_decimal( array_sum( wp_list_pluck( $grants, 'amount' ) ) )
+				)
+			);
+			$order->save();
+		}
+
+		/**
+		 * Get product grant config for a paid order item.
+		 *
+		 * @param WC_Order_Item_Product $item Order item.
+		 * @return array|null
+		 */
+		private static function get_product_grant_for_order_item( $item ) {
+			$product_id = self::get_item_product_or_parent_id( $item );
+
+			if ( ! $product_id ) {
+				return null;
+			}
+
+			$product_type = get_post_meta( $product_id, self::META_PRODUCT_TYPE, true );
+
+			if ( ! in_array( $product_type, array( 'package', 'drop_in' ), true ) ) {
+				return null;
+			}
+
+			$amount = (float) get_post_meta( $product_id, self::META_ZC_GRANT_AMOUNT, true );
+
+			if ( $amount <= 0 ) {
+				return null;
+			}
+
+			$source_label = get_post_meta( $product_id, self::META_SOURCE_LABEL, true );
+
+			if ( '' === $source_label ) {
+				$source_label = 'package' === $product_type ? __( 'Zencoin Package', 'coin-booking-bridge' ) : __( 'Drop-In', 'coin-booking-bridge' );
+			}
+
+			return array(
+				'product_id'    => $product_id,
+				'product_type'  => $product_type,
+				'amount'        => $amount,
+				'validity_days' => self::get_product_grant_validity_days( $product_id, $product_type ),
+				'source_label'  => $source_label,
+				'package_size'  => get_post_meta( $product_id, self::META_PACKAGE_SIZE, true ),
+			);
+		}
+
+		/**
+		 * Get validity days for a package/drop-in product grant.
+		 *
+		 * @param int    $product_id   Product ID.
+		 * @param string $product_type Product type.
+		 * @return int
+		 */
+		private static function get_product_grant_validity_days( $product_id, $product_type ) {
+			$override = get_post_meta( $product_id, self::META_VALIDITY_DAYS, true );
+
+			if ( '' !== $override ) {
+				return absint( $override );
+			}
+
+			$settings = self::get_settings();
+
+			if ( 'drop_in' === $product_type ) {
+				return absint( $settings['dropin_validity_days'] );
+			}
+
+			$package_size = get_post_meta( $product_id, self::META_PACKAGE_SIZE, true );
+
+			if ( 'large' === $package_size ) {
+				return absint( $settings['package_large_validity_days'] );
+			}
+
+			if ( 'medium' === $package_size ) {
+				return absint( $settings['package_medium_validity_days'] );
+			}
+
+			return absint( $settings['package_small_validity_days'] );
+		}
+
+		/**
+		 * Calculate expiry datetime from validity days.
+		 *
+		 * @param int                    $validity_days Validity days.
+		 * @param WC_DateTime|null|mixed $base_date     Base date.
+		 * @return string|null
+		 */
+		private static function calculate_expiry_datetime( $validity_days, $base_date = null ) {
+			$validity_days = absint( $validity_days );
+
+			if ( $validity_days <= 0 ) {
+				return null;
+			}
+
+			$timestamp = $base_date instanceof WC_DateTime ? $base_date->getTimestamp() : current_time( 'timestamp' );
+
+			return gmdate( 'Y-m-d H:i:s', $timestamp + ( DAY_IN_SECONDS * $validity_days ) );
+		}
+
+		/**
+		 * Get ledger type for grant source.
+		 *
+		 * @param string $product_type Product type.
+		 * @return string
+		 */
+		private static function get_grant_ledger_type( $product_type ) {
+			if ( 'drop_in' === $product_type ) {
+				return 'drop_in_purchase';
+			}
+
+			return 'package_purchase';
+		}
+
+		/**
+		 * Mirror a credit to Tera Wallet when enabled.
+		 *
+		 * @param int    $user_id  User ID.
+		 * @param float  $amount   ZC amount.
+		 * @param string $details  Wallet details.
+		 * @param string $currency Currency code.
+		 * @return int|false|null
+		 */
+		private static function mirror_wallet_credit( $user_id, $amount, $details, $currency ) {
+			$settings = self::get_settings();
+
+			if ( 'yes' !== $settings['tera_wallet_mirror_enabled'] || ! function_exists( 'woo_wallet' ) ) {
+				return null;
+			}
+
+			return woo_wallet()->wallet->credit(
+				$user_id,
+				$amount,
+				$details,
+				array(
+					'for'      => 'zencoin_product_grant',
+					'currency' => $currency,
+				)
+			);
 		}
 
 		/**
