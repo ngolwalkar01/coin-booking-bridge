@@ -18,6 +18,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		const DB_VERSION        = '2026050801';
 		const OPTION_DB_VERSION = 'cbb_db_version';
 		const OPTION_SETTINGS   = 'cbb_zencoin_settings';
+		const CRON_EXPIRE_BUCKETS = 'cbb_zencoin_expire_buckets';
 
 		const TABLE_BUCKETS = 'cbb_zencoin_buckets';
 		const TABLE_LEDGER  = 'cbb_zencoin_ledger';
@@ -56,6 +57,14 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		 */
 		public static function activate() {
 			self::install_schema();
+			self::schedule_expiry_cron();
+		}
+
+		/**
+		 * Plugin deactivation callback.
+		 */
+		public static function deactivate() {
+			self::clear_expiry_cron();
 		}
 
 		/**
@@ -70,11 +79,15 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				add_action( 'admin_notices', array( __CLASS__, 'maybe_dependency_notice' ) );
 				add_action( 'admin_menu', array( __CLASS__, 'register_admin_menu' ) );
 				add_action( 'admin_init', array( __CLASS__, 'register_settings' ) );
+				add_action( 'admin_post_cbb_run_zencoin_expiry', array( __CLASS__, 'handle_manual_expiry_run' ) );
 				add_action( 'woocommerce_product_options_general_product_data', array( __CLASS__, 'render_product_fields' ) );
 				add_action( 'woocommerce_process_product_meta', array( __CLASS__, 'save_product_fields' ) );
 				add_action( 'woocommerce_product_after_variable_attributes', array( __CLASS__, 'render_variation_fields' ), 20, 3 );
 				add_action( 'woocommerce_save_product_variation', array( __CLASS__, 'save_variation_fields' ), 20, 2 );
 			}
+
+			self::schedule_expiry_cron();
+			add_action( self::CRON_EXPIRE_BUCKETS, array( __CLASS__, 'expire_zencoin_buckets' ) );
 
 			if ( ! self::dependencies_loaded() ) {
 				return;
@@ -185,6 +198,26 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			}
 
 			self::install_schema();
+		}
+
+		/**
+		 * Schedule daily bucket expiry maintenance.
+		 */
+		private static function schedule_expiry_cron() {
+			if ( ! wp_next_scheduled( self::CRON_EXPIRE_BUCKETS ) ) {
+				wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', self::CRON_EXPIRE_BUCKETS );
+			}
+		}
+
+		/**
+		 * Clear bucket expiry maintenance.
+		 */
+		private static function clear_expiry_cron() {
+			$timestamp = wp_next_scheduled( self::CRON_EXPIRE_BUCKETS );
+
+			if ( $timestamp ) {
+				wp_unschedule_event( $timestamp, self::CRON_EXPIRE_BUCKETS );
+			}
 		}
 
 		/**
@@ -398,8 +431,22 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			$ledger_table   = self::get_ledger_table_name();
 			$buckets_exists = self::table_exists( $buckets_table );
 			$ledger_exists  = self::table_exists( $ledger_table );
+			$expired_count  = isset( $_GET['cbb_expired_buckets'] ) ? absint( wp_unslash( $_GET['cbb_expired_buckets'] ) ) : null; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 			?>
 			<h2><?php esc_html_e( 'System Status', 'coin-booking-bridge' ); ?></h2>
+			<?php if ( null !== $expired_count ) : ?>
+				<div class="notice notice-success inline">
+					<p>
+						<?php
+						printf(
+							/* translators: %s: expired bucket count */
+							esc_html__( 'Zencoin expiry run complete. Expired buckets: %s.', 'coin-booking-bridge' ),
+							esc_html( number_format_i18n( $expired_count ) )
+						);
+						?>
+					</p>
+				</div>
+			<?php endif; ?>
 			<table class="widefat striped" style="max-width: 900px; margin-bottom: 24px;">
 				<tbody>
 					<tr>
@@ -424,6 +471,10 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 							<th scope="row"><?php esc_html_e( 'Bucket records', 'coin-booking-bridge' ); ?></th>
 							<td><?php echo esc_html( number_format_i18n( self::get_table_row_count( $buckets_table ) ) ); ?></td>
 						</tr>
+						<tr>
+							<th scope="row"><?php esc_html_e( 'Expired active buckets ready for cleanup', 'coin-booking-bridge' ); ?></th>
+							<td><?php echo esc_html( number_format_i18n( self::get_expirable_bucket_count() ) ); ?></td>
+						</tr>
 					<?php endif; ?>
 					<tr>
 						<th scope="row"><?php echo esc_html( $ledger_table ); ?></th>
@@ -441,6 +492,11 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 					</tr>
 				</tbody>
 			</table>
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin: -12px 0 24px;">
+				<input type="hidden" name="action" value="cbb_run_zencoin_expiry" />
+				<?php wp_nonce_field( 'cbb_run_zencoin_expiry' ); ?>
+				<?php submit_button( __( 'Run Zencoin expiry now', 'coin-booking-bridge' ), 'secondary', 'submit', false ); ?>
+			</form>
 			<?php
 		}
 
@@ -470,6 +526,29 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			}
 
 			return (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table_name}" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		}
+
+		/**
+		 * Get count of active buckets whose expiry time has passed.
+		 *
+		 * @return int
+		 */
+		private static function get_expirable_bucket_count() {
+			global $wpdb;
+
+			$table = self::get_buckets_table_name();
+
+			if ( ! self::table_exists( $table ) ) {
+				return 0;
+			}
+
+			return (int) $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT COUNT(*) FROM {$table} WHERE status = %s AND remaining_amount > 0 AND expires_at IS NOT NULL AND expires_at <= %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					'active',
+					current_time( 'mysql' )
+				)
+			);
 		}
 
 		/**
@@ -592,6 +671,105 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			);
 
 			return $inserted ? (int) $wpdb->insert_id : false;
+		}
+
+		/**
+		 * Expire active buckets whose expiry datetime has passed.
+		 *
+		 * @return int Number of expired buckets.
+		 */
+		public static function expire_zencoin_buckets() {
+			global $wpdb;
+
+			$table = self::get_buckets_table_name();
+
+			if ( ! self::table_exists( $table ) ) {
+				return 0;
+			}
+
+			$now     = current_time( 'mysql' );
+			$buckets = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT * FROM {$table} WHERE status = %s AND remaining_amount > 0 AND expires_at IS NOT NULL AND expires_at <= %s ORDER BY expires_at ASC, id ASC", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					'active',
+					$now
+				)
+			);
+
+			$expired = 0;
+
+			foreach ( $buckets as $bucket ) {
+				$remaining = (float) $bucket->remaining_amount;
+
+				if ( $remaining <= 0 ) {
+					continue;
+				}
+
+				$updated = $wpdb->update(
+					$table,
+					array(
+						'remaining_amount' => self::format_zencoin_amount( 0 ),
+						'status'           => 'expired',
+						'updated_at'       => $now,
+					),
+					array( 'id' => (int) $bucket->id ),
+					array( '%f', '%s', '%s' ),
+					array( '%d' )
+				);
+
+				if ( false === $updated ) {
+					continue;
+				}
+
+				self::add_zencoin_ledger_entry(
+					(int) $bucket->user_id,
+					$remaining,
+					array(
+						'bucket_id'               => (int) $bucket->id,
+						'entry_type'              => 'expired',
+						'direction'               => 'debit',
+						'balance_after'           => self::get_zencoin_bucket_balance( (int) $bucket->user_id ),
+						'label'                   => __( 'Zencoins expired', 'coin-booking-bridge' ),
+						'related_order_id'        => $bucket->related_order_id,
+						'related_order_item_id'   => $bucket->related_order_item_id,
+						'related_product_id'      => $bucket->related_product_id,
+						'related_subscription_id' => $bucket->related_subscription_id,
+						'related_booking_id'      => $bucket->related_booking_id,
+						'metadata'                => array(
+							'expired_at'  => $now,
+							'expires_at'  => $bucket->expires_at,
+							'source_type' => $bucket->source_type,
+						),
+					)
+				);
+
+				$expired++;
+			}
+
+			return $expired;
+		}
+
+		/**
+		 * Handle manual expiry run from the admin status panel.
+		 */
+		public static function handle_manual_expiry_run() {
+			if ( ! current_user_can( 'manage_woocommerce' ) ) {
+				wp_die( esc_html__( 'You do not have permission to run Zencoin expiry.', 'coin-booking-bridge' ) );
+			}
+
+			check_admin_referer( 'cbb_run_zencoin_expiry' );
+
+			$expired = self::expire_zencoin_buckets();
+			$url     = add_query_arg(
+				array(
+					'page'                => 'cbb-zencoin-settings',
+					'cbb_expired_buckets' => $expired,
+				),
+				admin_url( 'admin.php' )
+			);
+
+			wp_safe_redirect( $url );
+			exit;
 		}
 
 		/**
@@ -2371,5 +2549,6 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 	}
 
 	register_activation_hook( __FILE__, array( 'CBB_Coin_Booking_Bridge', 'activate' ) );
+	register_deactivation_hook( __FILE__, array( 'CBB_Coin_Booking_Bridge', 'deactivate' ) );
 	CBB_Coin_Booking_Bridge::init();
 }

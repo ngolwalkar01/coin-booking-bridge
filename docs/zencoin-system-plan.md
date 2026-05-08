@@ -862,6 +862,24 @@ Not included yet:
 - No-rollover membership reset enforcement.
 - Bucket-aware refunds.
 
+### Milestone 3.2: Bucket Expiry Maintenance
+
+Status: implemented in plugin version `0.2.0`.
+
+Included:
+
+- Daily WP-Cron event for bucket expiry maintenance.
+- Manual admin action in **WooCommerce > Zencoin Settings** to run expiry immediately.
+- Active buckets with passed `expires_at` are marked `expired`.
+- Unused remaining Zencoins in expired buckets are debited to zero.
+- Expiry creates append-only ledger entries with entry type `expired`.
+- System Status shows how many active expired buckets are ready for cleanup.
+
+Not included yet:
+
+- No-rollover membership reset enforcement.
+- Bucket-aware refunds.
+
 ## Open Questions
 
 Answered:
