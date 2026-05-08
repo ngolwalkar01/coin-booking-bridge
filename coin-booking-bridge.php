@@ -25,6 +25,12 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		const META_GRANT_AMOUNT     = '_cbb_coin_grant_amount';
 		const META_BOOKING_COST     = '_cbb_booking_coin_cost';
 		const META_REFUND_POLICY    = '_cbb_coin_refund_policy';
+		const META_PRODUCT_TYPE     = '_cbb_zencoin_product_type';
+		const META_ZC_GRANT_AMOUNT  = '_cbb_zencoin_grant_amount';
+		const META_VALIDITY_DAYS    = '_cbb_zencoin_validity_days';
+		const META_SOURCE_LABEL     = '_cbb_zencoin_source_label';
+		const META_ONE_TIME_PERSON  = '_cbb_zencoin_one_time_per_person';
+		const META_PACKAGE_SIZE     = '_cbb_zencoin_package_size';
 		const META_CREDIT_TXN       = '_cbb_coins_credited_transaction_id';
 		const META_DEBIT_TXN        = '_cbb_coins_debited_transaction_id';
 		const META_REFUND_TXN       = '_cbb_coins_refunded_transaction_id';
@@ -554,6 +560,96 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			);
 
 			echo '</div>';
+			echo '<div class="options_group">';
+
+			woocommerce_wp_select(
+				array(
+					'id'          => self::META_PRODUCT_TYPE,
+					'label'       => __( 'Zencoin product type', 'coin-booking-bridge' ),
+					'description' => __( 'Classifies non-booking products that will grant Zencoins in the bucket system. Saving only for now; grant behavior is wired in a later milestone.', 'coin-booking-bridge' ),
+					'desc_tip'    => true,
+					'options'     => self::get_zencoin_product_type_options(),
+				)
+			);
+
+			woocommerce_wp_text_input(
+				array(
+					'id'                => self::META_ZC_GRANT_AMOUNT,
+					'label'             => __( 'Zencoins granted on paid order', 'coin-booking-bridge' ),
+					'description'       => __( 'Used for packages, drop-ins, free trials, gift cards, and top-ups once bucket grants are enabled.', 'coin-booking-bridge' ),
+					'desc_tip'          => true,
+					'type'              => 'number',
+					'custom_attributes' => array(
+						'step' => '0.01',
+						'min'  => '0',
+					),
+				)
+			);
+
+			woocommerce_wp_text_input(
+				array(
+					'id'                => self::META_VALIDITY_DAYS,
+					'label'             => __( 'Zencoin validity days', 'coin-booking-bridge' ),
+					'description'       => __( 'Leave empty to use the central default for the selected product type.', 'coin-booking-bridge' ),
+					'desc_tip'          => true,
+					'type'              => 'number',
+					'custom_attributes' => array(
+						'step' => '1',
+						'min'  => '0',
+					),
+				)
+			);
+
+			woocommerce_wp_text_input(
+				array(
+					'id'          => self::META_SOURCE_LABEL,
+					'label'       => __( 'Wallet source label', 'coin-booking-bridge' ),
+					'description' => __( 'Optional label used later for wallet activity and reporting.', 'coin-booking-bridge' ),
+					'desc_tip'    => true,
+					'type'        => 'text',
+				)
+			);
+
+			woocommerce_wp_select(
+				array(
+					'id'          => self::META_PACKAGE_SIZE,
+					'label'       => __( 'Package size', 'coin-booking-bridge' ),
+					'description' => __( 'Optional reporting hint for package products.', 'coin-booking-bridge' ),
+					'desc_tip'    => true,
+					'options'     => array(
+						''       => __( 'Not a package', 'coin-booking-bridge' ),
+						'small'  => __( 'Small', 'coin-booking-bridge' ),
+						'medium' => __( 'Medium', 'coin-booking-bridge' ),
+						'large'  => __( 'Large', 'coin-booking-bridge' ),
+					),
+				)
+			);
+
+			woocommerce_wp_checkbox(
+				array(
+					'id'          => self::META_ONE_TIME_PERSON,
+					'label'       => __( 'One-time per person', 'coin-booking-bridge' ),
+					'description' => __( 'For free trial style products. Eligibility will use normalized email and phone once enforcement is enabled.', 'coin-booking-bridge' ),
+				)
+			);
+
+			echo '</div>';
+		}
+
+		/**
+		 * Get Zencoin product type options.
+		 *
+		 * @return array
+		 */
+		private static function get_zencoin_product_type_options() {
+			return array(
+				'none'         => __( 'None', 'coin-booking-bridge' ),
+				'package'      => __( 'Package', 'coin-booking-bridge' ),
+				'drop_in'      => __( 'Drop-in', 'coin-booking-bridge' ),
+				'free_drop_in' => __( 'Free drop-in trial', 'coin-booking-bridge' ),
+				'gift_card'    => __( 'Gift card', 'coin-booking-bridge' ),
+				'auto_top_up'  => __( 'Auto top-up', 'coin-booking-bridge' ),
+			);
 		}
 
 		/**
@@ -597,10 +693,22 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			$grant_amount = isset( $_POST[ self::META_GRANT_AMOUNT ] ) ? wc_format_decimal( wp_unslash( $_POST[ self::META_GRANT_AMOUNT ] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
 			$booking_cost = isset( $_POST[ self::META_BOOKING_COST ] ) ? wc_format_decimal( wp_unslash( $_POST[ self::META_BOOKING_COST ] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
 			$policy       = isset( $_POST[ self::META_REFUND_POLICY ] ) ? sanitize_key( wp_unslash( $_POST[ self::META_REFUND_POLICY ] ) ) : 'full'; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+			$product_type = isset( $_POST[ self::META_PRODUCT_TYPE ] ) ? sanitize_key( wp_unslash( $_POST[ self::META_PRODUCT_TYPE ] ) ) : 'none'; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+			$zc_amount    = isset( $_POST[ self::META_ZC_GRANT_AMOUNT ] ) ? self::sanitize_decimal_setting( wp_unslash( $_POST[ self::META_ZC_GRANT_AMOUNT ] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+			$validity     = isset( $_POST[ self::META_VALIDITY_DAYS ] ) && '' !== $_POST[ self::META_VALIDITY_DAYS ] ? absint( wp_unslash( $_POST[ self::META_VALIDITY_DAYS ] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+			$label        = isset( $_POST[ self::META_SOURCE_LABEL ] ) ? sanitize_text_field( wp_unslash( $_POST[ self::META_SOURCE_LABEL ] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+			$package_size = isset( $_POST[ self::META_PACKAGE_SIZE ] ) ? sanitize_key( wp_unslash( $_POST[ self::META_PACKAGE_SIZE ] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+			$one_time     = isset( $_POST[ self::META_ONE_TIME_PERSON ] ) ? 'yes' : 'no'; // phpcs:ignore WordPress.Security.NonceVerification.Missing
 
 			update_post_meta( $post_id, self::META_GRANT_AMOUNT, $grant_amount );
 			update_post_meta( $post_id, self::META_BOOKING_COST, $booking_cost );
 			update_post_meta( $post_id, self::META_REFUND_POLICY, in_array( $policy, array( 'full', 'none' ), true ) ? $policy : 'full' );
+			update_post_meta( $post_id, self::META_PRODUCT_TYPE, array_key_exists( $product_type, self::get_zencoin_product_type_options() ) ? $product_type : 'none' );
+			update_post_meta( $post_id, self::META_ZC_GRANT_AMOUNT, $zc_amount );
+			update_post_meta( $post_id, self::META_VALIDITY_DAYS, $validity );
+			update_post_meta( $post_id, self::META_SOURCE_LABEL, $label );
+			update_post_meta( $post_id, self::META_PACKAGE_SIZE, in_array( $package_size, array( '', 'small', 'medium', 'large' ), true ) ? $package_size : '' );
+			update_post_meta( $post_id, self::META_ONE_TIME_PERSON, $one_time );
 		}
 
 		/**

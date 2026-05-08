@@ -733,6 +733,21 @@ Included:
 - Ledger table readiness check.
 - Runtime note confirming current MVP credit/debit behavior is still active.
 
+### Milestone 0.4: Product Zencoin Configuration Skeleton
+
+Status: implemented in plugin version `0.2.0`.
+
+Included:
+
+- Product-level Zencoin product type field.
+- Product-level grant amount field for future package/drop-in/free-trial/gift-card/top-up grants.
+- Optional validity-days override.
+- Optional wallet source label.
+- Optional package size marker.
+- One-time-per-person flag for free trial products.
+
+These fields save product meta only. They do not grant Zencoin buckets yet.
+
 ## Open Questions
 
 Answered:
