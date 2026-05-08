@@ -801,6 +801,26 @@ Not included yet:
 - Gift card redemption.
 - Bucket-aware booking debit.
 
+### Milestone 1.3: Membership Grant Buckets and Ledger Entries
+
+Status: implemented in plugin version `0.2.0`.
+
+Included:
+
+- Existing subscription payment grants now also create membership Zencoin buckets.
+- Existing renewal payment grants now also create membership Zencoin buckets.
+- Membership grant buckets expire at the next payment date when available.
+- Membership grant buckets fall back to one month expiry if no next payment date is available.
+- Membership grants create append-only ledger credit entries.
+- Existing Tera Wallet membership credit behavior remains active and idempotent.
+- Order stores `_cbb_zencoin_membership_grant` for bucket/ledger diagnostics.
+
+Not included yet:
+
+- No-rollover reset/expiry enforcement.
+- Subscription on-hold wallet freeze.
+- Bucket-aware booking debit.
+
 ## Open Questions
 
 Answered:

@@ -33,6 +33,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		const META_PACKAGE_SIZE     = '_cbb_zencoin_package_size';
 		const META_CREDIT_TXN       = '_cbb_coins_credited_transaction_id';
 		const META_PRODUCT_GRANTS   = '_cbb_zencoin_product_grants';
+		const META_MEMBERSHIP_GRANT = '_cbb_zencoin_membership_grant';
 		const META_TRIAL_IDENTITY   = '_cbb_free_trial_identity';
 		const META_TRIAL_EMAIL_HASH = '_cbb_free_trial_email_hash';
 		const META_TRIAL_PHONE_HASH = '_cbb_free_trial_phone_hash';
@@ -1506,8 +1507,57 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			);
 
 			if ( $transaction_id ) {
+				$bucket_id = self::create_zencoin_bucket(
+					$user_id,
+					$coins,
+					array(
+						'source_type'             => 'membership',
+						'expires_at'              => self::get_subscription_bucket_expiry( $subscription ),
+						'related_order_id'        => $order->get_id(),
+						'related_subscription_id' => $subscription->get_id(),
+						'source_label'            => __( 'Membership Credits', 'coin-booking-bridge' ),
+						'metadata'                => array(
+							'order_number'        => $order->get_order_number(),
+							'subscription_number' => $subscription->get_order_number(),
+						),
+					)
+				);
+
+				$ledger_id = false;
+
+				if ( $bucket_id ) {
+					$ledger_id = self::add_zencoin_ledger_entry(
+						$user_id,
+						$coins,
+						array(
+							'bucket_id'               => $bucket_id,
+							'entry_type'              => 'membership_grant',
+							'direction'               => 'credit',
+							'balance_after'           => self::get_zencoin_bucket_balance( $user_id ),
+							'label'                   => __( 'Membership Credits', 'coin-booking-bridge' ),
+							'related_order_id'        => $order->get_id(),
+							'related_subscription_id' => $subscription->get_id(),
+						)
+					);
+				} else {
+					$order->add_order_note( __( 'Membership Zencoin bucket creation failed. Tera Wallet was credited by the MVP flow.', 'coin-booking-bridge' ) );
+				}
+
 				$order->update_meta_data( self::META_CREDIT_TXN, $transaction_id );
 				$order->update_meta_data( self::META_COIN_TOTAL, $coins );
+				$order->update_meta_data(
+					self::META_MEMBERSHIP_GRANT,
+					array(
+						array(
+							'product_type'          => 'membership',
+							'amount'                => self::format_zencoin_amount( $coins ),
+							'bucket_id'             => $bucket_id,
+							'ledger_id'             => $ledger_id,
+							'wallet_transaction_id' => $transaction_id,
+							'subscription_id'       => $subscription->get_id(),
+						),
+					)
+				);
 				$order->save();
 
 				$subscription->add_order_note(
@@ -1565,6 +1615,29 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			}
 
 			return (float) apply_filters( 'cbb_coin_grant_total_from_order', $total, $order );
+		}
+
+		/**
+		 * Get expiry datetime for a membership credit bucket.
+		 *
+		 * Uses next payment date when available. Falls back to one month from now for paid subscriptions
+		 * without a scheduled next payment date.
+		 *
+		 * @param WC_Subscription $subscription Subscription object.
+		 * @return string|null
+		 */
+		private static function get_subscription_bucket_expiry( $subscription ) {
+			if ( ! $subscription || ! is_object( $subscription ) || ! method_exists( $subscription, 'get_date' ) ) {
+				return null;
+			}
+
+			$next_payment = $subscription->get_date( 'next_payment', 'site' );
+
+			if ( $next_payment ) {
+				return self::sanitize_datetime_or_null( $next_payment );
+			}
+
+			return gmdate( 'Y-m-d H:i:s', current_time( 'timestamp' ) + MONTH_IN_SECONDS );
 		}
 
 		/**
