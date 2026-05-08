@@ -33,6 +33,9 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		const META_PACKAGE_SIZE     = '_cbb_zencoin_package_size';
 		const META_CREDIT_TXN       = '_cbb_coins_credited_transaction_id';
 		const META_PRODUCT_GRANTS   = '_cbb_zencoin_product_grants';
+		const META_TRIAL_IDENTITY   = '_cbb_free_trial_identity';
+		const META_TRIAL_EMAIL_HASH = '_cbb_free_trial_email_hash';
+		const META_TRIAL_PHONE_HASH = '_cbb_free_trial_phone_hash';
 		const META_DEBIT_TXN        = '_cbb_coins_debited_transaction_id';
 		const META_REFUND_TXN       = '_cbb_coins_refunded_transaction_id';
 		const META_COIN_TOTAL       = '_cbb_coin_total';
@@ -80,6 +83,8 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			add_action( 'woocommerce_payment_complete', array( __CLASS__, 'grant_order_product_zencoins' ), 20, 1 );
 			add_action( 'woocommerce_order_status_processing', array( __CLASS__, 'grant_order_product_zencoins' ), 20, 1 );
 			add_action( 'woocommerce_order_status_completed', array( __CLASS__, 'grant_order_product_zencoins' ), 20, 1 );
+			add_action( 'woocommerce_checkout_process', array( __CLASS__, 'validate_free_dropin_trial_checkout' ), 20 );
+			add_action( 'woocommerce_store_api_checkout_update_order_from_request', array( __CLASS__, 'validate_free_dropin_trial_store_api_checkout' ), 20, 2 );
 
 			add_action( 'woocommerce_before_calculate_totals', array( __CLASS__, 'zero_coin_booking_prices' ), 20 );
 			add_action( 'woocommerce_check_cart_items', array( __CLASS__, 'validate_cart_coin_balance' ), 20 );
@@ -1030,6 +1035,11 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 					continue;
 				}
 
+				if ( 'free_drop_in' === $grant['product_type'] && self::order_customer_has_used_free_trial( $order, $grant['product_id'] ) ) {
+					$order->add_order_note( __( 'Free drop-in Zencoin grant skipped because this email/phone identity has already used a free trial.', 'coin-booking-bridge' ) );
+					continue;
+				}
+
 				$amount = $grant['amount'] * max( 1, (float) $item->get_quantity() );
 
 				if ( $amount <= 0 ) {
@@ -1095,6 +1105,10 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 					'ledger_id'             => $ledger_id,
 					'wallet_transaction_id' => $wallet_transaction_id,
 				);
+
+				if ( 'free_drop_in' === $grant['product_type'] ) {
+					self::mark_free_trial_identity_used( $order, $grant['product_id'] );
+				}
 			}
 
 			if ( empty( $grants ) ) {
@@ -1113,6 +1127,211 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		}
 
 		/**
+		 * Validate free drop-in trial eligibility during classic checkout.
+		 */
+		public static function validate_free_dropin_trial_checkout() {
+			if ( ! WC()->cart || WC()->cart->is_empty() || ! self::cart_contains_free_dropin_trial() ) {
+				return;
+			}
+
+			$email = isset( $_POST['billing_email'] ) ? sanitize_email( wp_unslash( $_POST['billing_email'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+			$phone = isset( $_POST['billing_phone'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_phone'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+
+			if ( ! self::has_free_trial_identity( $email, $phone ) ) {
+				wc_add_notice( __( 'Please provide both email and phone number to claim the free drop-in trial.', 'coin-booking-bridge' ), 'error' );
+				return;
+			}
+
+			if ( self::free_trial_identity_has_been_used( $email, $phone ) ) {
+				wc_add_notice( __( 'This free drop-in trial has already been used for this email or phone number.', 'coin-booking-bridge' ), 'error' );
+			}
+		}
+
+		/**
+		 * Validate free drop-in trial eligibility during Store API checkout.
+		 *
+		 * @param WC_Order   $order   Draft order.
+		 * @param WP_REST_Request $request Store API request.
+		 */
+		public static function validate_free_dropin_trial_store_api_checkout( $order, $request ) {
+			if ( ! WC()->cart || WC()->cart->is_empty() || ! self::cart_contains_free_dropin_trial() ) {
+				return;
+			}
+
+			$email = $order instanceof WC_Order ? $order->get_billing_email() : '';
+			$phone = $order instanceof WC_Order ? $order->get_billing_phone() : '';
+
+			if ( ! self::has_free_trial_identity( $email, $phone ) ) {
+				throw new Exception( esc_html__( 'Please provide both email and phone number to claim the free drop-in trial.', 'coin-booking-bridge' ) );
+			}
+
+			if ( self::free_trial_identity_has_been_used( $email, $phone ) ) {
+				throw new Exception( esc_html__( 'This free drop-in trial has already been used for this email or phone number.', 'coin-booking-bridge' ) );
+			}
+		}
+
+		/**
+		 * Check whether cart contains a free drop-in trial product.
+		 *
+		 * @return bool
+		 */
+		private static function cart_contains_free_dropin_trial() {
+			foreach ( WC()->cart->get_cart() as $cart_item ) {
+				$product_id = ! empty( $cart_item['product_id'] ) ? (int) $cart_item['product_id'] : 0;
+
+				if ( $product_id && 'free_drop_in' === get_post_meta( $product_id, self::META_PRODUCT_TYPE, true ) ) {
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		/**
+		 * Check whether order customer identity has already used free trial.
+		 *
+		 * @param WC_Order $order      Order.
+		 * @param int      $product_id Product ID.
+		 * @return bool
+		 */
+		private static function order_customer_has_used_free_trial( $order, $product_id ) {
+			if ( ! $order instanceof WC_Order ) {
+				return false;
+			}
+
+			return self::free_trial_identity_has_been_used(
+				$order->get_billing_email(),
+				$order->get_billing_phone(),
+				$order->get_id()
+			);
+		}
+
+		/**
+		 * Mark free trial identity as used on an order.
+		 *
+		 * @param WC_Order $order      Order.
+		 * @param int      $product_id Product ID.
+		 */
+		private static function mark_free_trial_identity_used( $order, $product_id ) {
+			if ( ! $order instanceof WC_Order ) {
+				return;
+			}
+
+			$email_hash = self::hash_free_trial_email( $order->get_billing_email() );
+			$phone_hash = self::hash_free_trial_phone( $order->get_billing_phone() );
+
+			$order->update_meta_data(
+				self::META_TRIAL_IDENTITY,
+				array(
+					'email_hash' => $email_hash,
+					'phone_hash' => $phone_hash,
+					'product_id' => absint( $product_id ),
+				)
+			);
+			$order->update_meta_data( self::META_TRIAL_EMAIL_HASH, $email_hash );
+			$order->update_meta_data( self::META_TRIAL_PHONE_HASH, $phone_hash );
+		}
+
+		/**
+		 * Check whether a free trial identity has already been used.
+		 *
+		 * @param string $email            Email.
+		 * @param string $phone            Phone.
+		 * @param int    $exclude_order_id Optional order ID to exclude.
+		 * @return bool
+		 */
+		private static function free_trial_identity_has_been_used( $email, $phone, $exclude_order_id = 0 ) {
+			if ( ! self::has_free_trial_identity( $email, $phone ) ) {
+				return false;
+			}
+
+			$meta_query = array( 'relation' => 'OR' );
+			$email_hash = self::hash_free_trial_email( $email );
+			$phone_hash = self::hash_free_trial_phone( $phone );
+
+			if ( $email_hash ) {
+				$meta_query[] = array(
+					'key'   => self::META_TRIAL_EMAIL_HASH,
+					'value' => $email_hash,
+				);
+			}
+
+			if ( $phone_hash ) {
+				$meta_query[] = array(
+					'key'   => self::META_TRIAL_PHONE_HASH,
+					'value' => $phone_hash,
+				);
+			}
+
+			$query_args = array(
+				'limit'        => 1,
+				'return'       => 'ids',
+				'status'       => array( 'wc-processing', 'wc-completed' ),
+				'meta_query'   => $meta_query, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+				'exclude'      => $exclude_order_id ? array( absint( $exclude_order_id ) ) : array(),
+			);
+
+			$orders = wc_get_orders( $query_args );
+
+			return ! empty( $orders );
+		}
+
+		/**
+		 * Whether identity has both required values.
+		 *
+		 * @param string $email Email.
+		 * @param string $phone Phone.
+		 * @return bool
+		 */
+		private static function has_free_trial_identity( $email, $phone ) {
+			return '' !== self::normalize_free_trial_email( $email ) && '' !== self::normalize_free_trial_phone( $phone );
+		}
+
+		/**
+		 * Hash normalized email.
+		 *
+		 * @param string $email Email.
+		 * @return string
+		 */
+		private static function hash_free_trial_email( $email ) {
+			$email = self::normalize_free_trial_email( $email );
+
+			return $email ? wp_hash( $email ) : '';
+		}
+
+		/**
+		 * Hash normalized phone.
+		 *
+		 * @param string $phone Phone.
+		 * @return string
+		 */
+		private static function hash_free_trial_phone( $phone ) {
+			$phone = self::normalize_free_trial_phone( $phone );
+
+			return $phone ? wp_hash( $phone ) : '';
+		}
+
+		/**
+		 * Normalize email for free trial identity.
+		 *
+		 * @param string $email Email.
+		 * @return string
+		 */
+		private static function normalize_free_trial_email( $email ) {
+			return strtolower( sanitize_email( $email ) );
+		}
+
+		/**
+		 * Normalize phone for free trial identity.
+		 *
+		 * @param string $phone Phone.
+		 * @return string
+		 */
+		private static function normalize_free_trial_phone( $phone ) {
+			return preg_replace( '/[^0-9+]/', '', (string) $phone );
+		}
+
+		/**
 		 * Get product grant config for a paid order item.
 		 *
 		 * @param WC_Order_Item_Product $item Order item.
@@ -1127,7 +1346,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 
 			$product_type = get_post_meta( $product_id, self::META_PRODUCT_TYPE, true );
 
-			if ( ! in_array( $product_type, array( 'package', 'drop_in' ), true ) ) {
+			if ( ! in_array( $product_type, array( 'package', 'drop_in', 'free_drop_in' ), true ) ) {
 				return null;
 			}
 
@@ -1140,7 +1359,11 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			$source_label = get_post_meta( $product_id, self::META_SOURCE_LABEL, true );
 
 			if ( '' === $source_label ) {
-				$source_label = 'package' === $product_type ? __( 'Zencoin Package', 'coin-booking-bridge' ) : __( 'Drop-In', 'coin-booking-bridge' );
+				if ( 'free_drop_in' === $product_type ) {
+					$source_label = __( 'Free Drop-In Trial', 'coin-booking-bridge' );
+				} else {
+					$source_label = 'package' === $product_type ? __( 'Zencoin Package', 'coin-booking-bridge' ) : __( 'Drop-In', 'coin-booking-bridge' );
+				}
 			}
 
 			return array(
@@ -1171,6 +1394,10 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 
 			if ( 'drop_in' === $product_type ) {
 				return absint( $settings['dropin_validity_days'] );
+			}
+
+			if ( 'free_drop_in' === $product_type ) {
+				return absint( $settings['free_dropin_validity_days'] );
 			}
 
 			$package_size = get_post_meta( $product_id, self::META_PACKAGE_SIZE, true );
@@ -1214,6 +1441,10 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		private static function get_grant_ledger_type( $product_type ) {
 			if ( 'drop_in' === $product_type ) {
 				return 'drop_in_purchase';
+			}
+
+			if ( 'free_drop_in' === $product_type ) {
+				return 'free_drop_in_trial';
 			}
 
 			return 'package_purchase';

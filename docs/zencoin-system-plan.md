@@ -782,6 +782,25 @@ Not included yet:
 - Auto top-up.
 - Bucket-aware booking debit.
 
+### Milestone 1.2: Free Drop-In Trial Grants and Eligibility
+
+Status: implemented in plugin version `0.2.0`.
+
+Included:
+
+- Free drop-in trial products can create Zencoin buckets on paid/completed orders.
+- Free drop-in trial products create append-only ledger credit entries.
+- Free drop-in trial products can mirror credits to Tera Wallet when enabled.
+- Checkout requires both billing email and billing phone for free drop-in trial claims.
+- Repeat claims are blocked by normalized email hash or normalized phone hash.
+- Used identity hashes are stored on the successful order.
+
+Not included yet:
+
+- Stronger identity checks beyond email and phone.
+- Gift card redemption.
+- Bucket-aware booking debit.
+
 ## Open Questions
 
 Answered:
