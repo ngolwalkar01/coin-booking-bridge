@@ -41,6 +41,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		const META_REFUND_TXN       = '_cbb_coins_refunded_transaction_id';
 		const META_COIN_TOTAL       = '_cbb_coin_total';
 		const META_COIN_ITEM_COST   = '_cbb_coin_item_cost';
+		const META_COIN_CONSUMPTION = '_cbb_coin_consumption';
 		const META_REFUNDED_TOTAL   = '_cbb_coins_refunded_total';
 
 		/**
@@ -621,6 +622,116 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 					$now
 				)
 			);
+		}
+
+		/**
+		 * Debit Zencoins from active buckets.
+		 *
+		 * Consumption order is membership buckets first, then purchased credits by earliest expiry.
+		 *
+		 * @param int   $user_id User ID.
+		 * @param float $amount  ZC amount.
+		 * @param array $args    Debit args.
+		 * @return array|false Consumption rows or false.
+		 */
+		public static function debit_zencoin_buckets( $user_id, $amount, $args = array() ) {
+			global $wpdb;
+
+			$user_id = absint( $user_id );
+			$amount  = (float) $amount;
+
+			if ( $user_id <= 0 || $amount <= 0 ) {
+				return false;
+			}
+
+			if ( self::get_zencoin_bucket_balance( $user_id ) + 0.000001 < $amount ) {
+				return false;
+			}
+
+			$defaults = array(
+				'entry_type'            => 'booking_charge',
+				'label'                 => __( 'Booking charge', 'coin-booking-bridge' ),
+				'related_order_id'      => null,
+				'related_order_item_id' => null,
+				'related_product_id'    => null,
+				'related_booking_id'    => null,
+				'metadata'              => array(),
+			);
+			$args     = wp_parse_args( $args, $defaults );
+			$remaining = $amount;
+			$now       = current_time( 'mysql' );
+			$table     = self::get_buckets_table_name();
+
+			$buckets = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT * FROM {$table} WHERE user_id = %d AND status = %s AND remaining_amount > 0 AND (expires_at IS NULL OR expires_at > %s) ORDER BY CASE WHEN source_type = 'membership' THEN 0 ELSE 1 END ASC, expires_at IS NULL ASC, expires_at ASC, id ASC", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					$user_id,
+					'active',
+					$now
+				)
+			);
+
+			$consumption = array();
+
+			foreach ( $buckets as $bucket ) {
+				if ( $remaining <= 0 ) {
+					break;
+				}
+
+				$bucket_remaining = (float) $bucket->remaining_amount;
+				$debit_amount     = min( $bucket_remaining, $remaining );
+				$new_remaining    = max( 0, $bucket_remaining - $debit_amount );
+				$new_status       = $new_remaining > 0 ? 'active' : 'consumed';
+
+				$updated = $wpdb->update(
+					$table,
+					array(
+						'remaining_amount' => self::format_zencoin_amount( $new_remaining ),
+						'status'           => $new_status,
+						'updated_at'       => $now,
+					),
+					array( 'id' => (int) $bucket->id ),
+					array( '%f', '%s', '%s' ),
+					array( '%d' )
+				);
+
+				if ( false === $updated ) {
+					return false;
+				}
+
+				$ledger_id = self::add_zencoin_ledger_entry(
+					$user_id,
+					$debit_amount,
+					array(
+						'bucket_id'             => (int) $bucket->id,
+						'entry_type'            => $args['entry_type'],
+						'direction'             => 'debit',
+						'balance_after'         => self::get_zencoin_bucket_balance( $user_id ),
+						'label'                 => $args['label'],
+						'related_order_id'      => $args['related_order_id'],
+						'related_order_item_id' => $args['related_order_item_id'],
+						'related_product_id'    => $args['related_product_id'],
+						'related_booking_id'    => $args['related_booking_id'],
+						'metadata'              => $args['metadata'],
+					)
+				);
+
+				$consumption[] = array(
+					'bucket_id'    => (int) $bucket->id,
+					'ledger_id'    => $ledger_id,
+					'amount'       => self::format_zencoin_amount( $debit_amount ),
+					'source_type'  => $bucket->source_type,
+					'expires_at'   => $bucket->expires_at,
+				);
+
+				$remaining -= $debit_amount;
+			}
+
+			if ( $remaining > 0.000001 ) {
+				return false;
+			}
+
+			return $consumption;
 		}
 
 		/**
@@ -1479,6 +1590,37 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		}
 
 		/**
+		 * Mirror a debit to Tera Wallet when enabled.
+		 *
+		 * @param int    $user_id  User ID.
+		 * @param float  $amount   ZC amount.
+		 * @param string $details  Wallet details.
+		 * @param string $currency Currency code.
+		 * @return int|string|false
+		 */
+		private static function mirror_wallet_debit( $user_id, $amount, $details, $currency ) {
+			$settings = self::get_settings();
+
+			if ( 'yes' !== $settings['tera_wallet_mirror_enabled'] ) {
+				return 'tera_wallet_mirror_disabled';
+			}
+
+			if ( ! function_exists( 'woo_wallet' ) ) {
+				return false;
+			}
+
+			return woo_wallet()->wallet->debit(
+				$user_id,
+				$amount,
+				$details,
+				array(
+					'for'      => 'booking_payment',
+					'currency' => $currency,
+				)
+			);
+		}
+
+		/**
 		 * Credit coins for the paid subscription order.
 		 *
 		 * @param WC_Subscription $subscription Subscription object.
@@ -1715,7 +1857,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				return;
 			}
 
-			$balance = self::get_wallet_balance( get_current_user_id() );
+			$balance = self::get_available_coin_balance( get_current_user_id() );
 			if ( $balance < $required ) {
 				self::add_validation_error(
 					sprintf(
@@ -1788,14 +1930,38 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				return;
 			}
 
-			$transaction_id = woo_wallet()->wallet->debit(
+			$details     = sprintf( __( 'Coins used for booking order #%s', 'coin-booking-bridge' ), $order->get_order_number() );
+			$consumption = false;
+
+			if ( self::get_zencoin_bucket_balance( $user_id ) + 0.000001 >= $coins ) {
+				$consumption = self::debit_zencoin_buckets(
+					$user_id,
+					$coins,
+					array(
+						'entry_type'       => 'booking_charge',
+						'label'            => sprintf(
+							/* translators: %s: order number */
+							__( 'Booking order #%s', 'coin-booking-bridge' ),
+							$order->get_order_number()
+						),
+						'related_order_id' => $order->get_id(),
+						'metadata'         => array(
+							'order_number' => $order->get_order_number(),
+						),
+					)
+				);
+
+				if ( ! $consumption ) {
+					$order->add_order_note( __( 'Bucket debit failed. Please review the Zencoin buckets and booking order manually.', 'coin-booking-bridge' ) );
+					return;
+				}
+			}
+
+			$transaction_id = self::mirror_wallet_debit(
 				$user_id,
 				$coins,
-				sprintf( __( 'Coins used for booking order #%s', 'coin-booking-bridge' ), $order->get_order_number() ),
-				array(
-					'for'      => 'booking_payment',
-					'currency' => $order->get_currency( 'edit' ),
-				)
+				$details,
+				$order->get_currency( 'edit' )
 			);
 
 			if ( ! $transaction_id ) {
@@ -1805,6 +1971,9 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 
 			$order->update_meta_data( self::META_DEBIT_TXN, $transaction_id );
 			$order->update_meta_data( self::META_COIN_TOTAL, $coins );
+			if ( $consumption ) {
+				$order->update_meta_data( self::META_COIN_CONSUMPTION, $consumption );
+			}
 			$order->add_order_note(
 				sprintf(
 					/* translators: 1: coin amount, 2: transaction id */
@@ -2000,6 +2169,21 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		 */
 		private static function get_wallet_balance( $user_id ) {
 			return (float) woo_wallet()->wallet->get_wallet_balance( $user_id, 'edit' );
+		}
+
+		/**
+		 * Get available coin balance for booking validation.
+		 *
+		 * During migration, use the larger of bucket balance and Tera Wallet balance so legacy wallet credits
+		 * still work until all balances are represented by buckets.
+		 *
+		 * @param int $user_id User ID.
+		 * @return float
+		 */
+		private static function get_available_coin_balance( $user_id ) {
+			$bucket_balance = self::get_zencoin_bucket_balance( $user_id );
+
+			return max( $bucket_balance, self::get_wallet_balance( $user_id ) );
 		}
 
 		/**

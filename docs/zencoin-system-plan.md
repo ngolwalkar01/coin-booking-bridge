@@ -821,6 +821,31 @@ Not included yet:
 - Subscription on-hold wallet freeze.
 - Bucket-aware booking debit.
 
+### Milestone 2.1: Bucket-Aware Booking Debit
+
+Status: implemented in plugin version `0.2.0`.
+
+Included:
+
+- Booking checkout validation can see both bucket balance and legacy Tera Wallet balance during migration.
+- Booking orders with enough active bucket balance debit buckets first.
+- Consumption order is membership buckets first, then purchased credits by earliest expiry.
+- Bucket debits create append-only ledger debit entries.
+- Order stores `_cbb_coin_consumption` with bucket-level debit details.
+- Tera Wallet debit still runs as the mirror/legacy visible balance update.
+- Existing order-level `_cbb_coins_debited_transaction_id` guard remains the idempotency guard.
+
+Transition behavior:
+
+- If a user has no usable bucket balance but has legacy Tera Wallet balance, the old wallet-only debit path can still process.
+- Refund-to-original-bucket is not active yet; refunds still use the existing MVP refund behavior.
+
+Not included yet:
+
+- Bucket-aware refunds.
+- Late-cancel/no-refund rules.
+- Studio-cancel refund-to-original-bucket.
+
 ## Open Questions
 
 Answered:
