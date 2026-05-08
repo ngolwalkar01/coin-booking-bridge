@@ -1886,7 +1886,14 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				return;
 			}
 
-			$balance = self::get_available_coin_balance( get_current_user_id() );
+			$user_id = get_current_user_id();
+
+			if ( self::is_wallet_frozen_for_user( $user_id ) ) {
+				self::add_validation_error( __( 'Your Zencoin wallet is temporarily paused because a membership subscription is on hold. Please update your membership before booking with coins.', 'coin-booking-bridge' ), $errors );
+				return;
+			}
+
+			$balance = self::get_available_coin_balance( $user_id );
 			if ( $balance < $required ) {
 				self::add_validation_error(
 					sprintf(
@@ -1956,6 +1963,11 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			$coins   = self::get_order_coin_total( $order );
 
 			if ( $user_id <= 0 || $coins <= 0 ) {
+				return;
+			}
+
+			if ( self::is_wallet_frozen_for_user( $user_id ) ) {
+				$order->update_status( 'on-hold', __( 'Zencoin debit blocked because the customer has an on-hold membership subscription.', 'coin-booking-bridge' ) );
 				return;
 			}
 
@@ -2240,6 +2252,52 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			$bucket_balance = self::get_zencoin_bucket_balance( $user_id );
 
 			return max( $bucket_balance, self::get_wallet_balance( $user_id ) );
+		}
+
+		/**
+		 * Check whether the customer's Zencoin wallet should be frozen.
+		 *
+		 * @param int $user_id User ID.
+		 * @return bool
+		 */
+		private static function is_wallet_frozen_for_user( $user_id ) {
+			$settings = self::get_settings();
+
+			if ( 'yes' !== $settings['wallet_freeze_on_subscription_on_hold'] || $user_id <= 0 || ! function_exists( 'wcs_get_users_subscriptions' ) ) {
+				return false;
+			}
+
+			foreach ( wcs_get_users_subscriptions( $user_id ) as $subscription ) {
+				if ( ! is_object( $subscription ) || ! method_exists( $subscription, 'has_status' ) || ! $subscription->has_status( 'on-hold' ) ) {
+					continue;
+				}
+
+				if ( self::subscription_contains_zencoin_grant( $subscription ) ) {
+					return (bool) apply_filters( 'cbb_wallet_frozen_for_user', true, $user_id, $subscription );
+				}
+			}
+
+			return (bool) apply_filters( 'cbb_wallet_frozen_for_user', false, $user_id, null );
+		}
+
+		/**
+		 * Check whether a subscription includes a Zencoin-granting product.
+		 *
+		 * @param WC_Subscription $subscription Subscription object.
+		 * @return bool
+		 */
+		private static function subscription_contains_zencoin_grant( $subscription ) {
+			if ( ! is_object( $subscription ) || ! method_exists( $subscription, 'get_items' ) ) {
+				return false;
+			}
+
+			foreach ( $subscription->get_items( 'line_item' ) as $item ) {
+				if ( self::get_item_coin_grant_amount( $item ) > 0 ) {
+					return true;
+				}
+			}
+
+			return false;
 		}
 
 		/**

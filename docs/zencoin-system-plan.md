@@ -846,6 +846,22 @@ Not included yet:
 - Late-cancel/no-refund rules.
 - Studio-cancel refund-to-original-bucket.
 
+### Milestone 3.1: Subscription On-Hold Wallet Freeze
+
+Status: implemented in plugin version `0.2.0`.
+
+Included:
+
+- Booking checkout validation blocks Zencoin booking when the customer has an on-hold Zencoin-granting subscription.
+- Final booking debit also blocks and moves the order to on-hold if a checkout flow reaches order processing while the wallet is frozen.
+- The freeze obeys the central setting `wallet_freeze_on_subscription_on_hold`.
+
+Not included yet:
+
+- Cron expiry for purchased buckets.
+- No-rollover membership reset enforcement.
+- Bucket-aware refunds.
+
 ## Open Questions
 
 Answered:
