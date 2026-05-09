@@ -1829,6 +1829,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			);
 
 			if ( $transaction_id ) {
+				$reset_count = self::reset_subscription_membership_buckets( $user_id, $subscription, $order );
 				$bucket_id = self::create_zencoin_bucket(
 					$user_id,
 					$coins,
@@ -1844,6 +1845,16 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 						),
 					)
 				);
+
+				if ( $reset_count > 0 ) {
+					$order->add_order_note(
+						sprintf(
+							/* translators: %s: bucket count */
+							__( 'Reset %s previous membership Zencoin bucket(s) before granting the new cycle.', 'coin-booking-bridge' ),
+							number_format_i18n( $reset_count )
+						)
+					);
+				}
 
 				$ledger_id = false;
 
@@ -1960,6 +1971,93 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			}
 
 			return gmdate( 'Y-m-d H:i:s', current_time( 'timestamp' ) + MONTH_IN_SECONDS );
+		}
+
+		/**
+		 * Reset active membership buckets for the subscription before granting the next cycle.
+		 *
+		 * @param int             $user_id      User ID.
+		 * @param WC_Subscription $subscription Subscription object.
+		 * @param WC_Order|null   $order        Renewal/order object.
+		 * @return int Number of reset buckets.
+		 */
+		private static function reset_subscription_membership_buckets( $user_id, $subscription, $order = null ) {
+			global $wpdb;
+
+			$user_id         = absint( $user_id );
+			$subscription_id = is_object( $subscription ) && method_exists( $subscription, 'get_id' ) ? absint( $subscription->get_id() ) : 0;
+			$table           = self::get_buckets_table_name();
+
+			if ( $user_id <= 0 || $subscription_id <= 0 || ! self::table_exists( $table ) ) {
+				return 0;
+			}
+
+			$buckets = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT * FROM {$table} WHERE user_id = %d AND related_subscription_id = %d AND source_type = %s AND status = %s AND remaining_amount > 0 ORDER BY id ASC", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					$user_id,
+					$subscription_id,
+					'membership',
+					'active'
+				)
+			);
+
+			if ( empty( $buckets ) ) {
+				return 0;
+			}
+
+			$now         = current_time( 'mysql' );
+			$reset_count = 0;
+
+			foreach ( $buckets as $bucket ) {
+				$remaining = (float) $bucket->remaining_amount;
+
+				if ( $remaining <= 0 ) {
+					continue;
+				}
+
+				$updated = $wpdb->update(
+					$table,
+					array(
+						'remaining_amount' => self::format_zencoin_amount( 0 ),
+						'status'           => 'expired',
+						'updated_at'       => $now,
+					),
+					array( 'id' => (int) $bucket->id ),
+					array( '%f', '%s', '%s' ),
+					array( '%d' )
+				);
+
+				if ( false === $updated ) {
+					continue;
+				}
+
+				self::add_zencoin_ledger_entry(
+					$user_id,
+					$remaining,
+					array(
+						'bucket_id'               => (int) $bucket->id,
+						'entry_type'              => 'membership_reset',
+						'direction'               => 'debit',
+						'balance_after'           => self::get_zencoin_bucket_balance( $user_id ),
+						'label'                   => __( 'Membership credits reset', 'coin-booking-bridge' ),
+						'related_order_id'        => $order instanceof WC_Order ? $order->get_id() : $bucket->related_order_id,
+						'related_order_item_id'   => $bucket->related_order_item_id,
+						'related_product_id'      => $bucket->related_product_id,
+						'related_subscription_id' => $subscription_id,
+						'related_booking_id'      => $bucket->related_booking_id,
+						'metadata'                => array(
+							'reset_at'                 => $now,
+							'original_bucket_expires_at' => $bucket->expires_at,
+							'subscription_number'      => is_object( $subscription ) && method_exists( $subscription, 'get_order_number' ) ? $subscription->get_order_number() : '',
+						),
+					)
+				);
+
+				$reset_count++;
+			}
+
+			return $reset_count;
 		}
 
 		/**

@@ -880,6 +880,22 @@ Not included yet:
 - No-rollover membership reset enforcement.
 - Bucket-aware refunds.
 
+### Milestone 3.3: Membership No-Rollover Reset
+
+Status: implemented in plugin version `0.2.0`.
+
+Included:
+
+- Before a new membership cycle bucket is granted, active remaining membership buckets for the same subscription are reset.
+- Reset buckets are marked `expired` and remaining ZC is set to zero.
+- Reset creates append-only ledger debit entries with entry type `membership_reset`.
+- Renewal order notes show how many previous membership buckets were reset.
+
+Not included yet:
+
+- One-active-membership enforcement.
+- Bucket-aware refunds.
+
 ## Open Questions
 
 Answered:
