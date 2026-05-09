@@ -898,6 +898,24 @@ Not included yet:
 - One-active-membership enforcement.
 - Bucket-aware refunds.
 
+### Milestone 4.1: Bucket-Aware Order Refunds
+
+Status: implemented in plugin version `0.2.0`.
+
+Included:
+
+- Cancelled/refunded booking orders with `_cbb_coin_consumption` restore ZC to the original consumed buckets.
+- Restored buckets preserve their original expiry; if the expiry has already passed, the bucket remains expired.
+- Refunds create append-only ledger credit entries with entry type `refund_on_time_cancel`.
+- Refunds mirror the credit back to Tera Wallet when mirroring is enabled.
+- Existing legacy wallet-only refund behavior remains as a fallback for older orders without bucket consumption data.
+
+Not included yet:
+
+- Booking-level on-time versus late cancellation cutoff.
+- Studio-cancel refund reason.
+- Partial booking-item bucket refunds.
+
 ## Open Questions
 
 Answered:

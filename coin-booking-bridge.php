@@ -2331,6 +2331,10 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				return;
 			}
 
+			if ( $order->get_meta( self::META_COIN_CONSUMPTION, true ) && self::refund_order_bucket_consumption( $order, __( 'Coin refund for booking order', 'coin-booking-bridge' ), 'refund_on_time_cancel' ) ) {
+				return;
+			}
+
 			$refundable       = self::get_order_refundable_coin_total( $order );
 			$already_refunded = (float) $order->get_meta( self::META_REFUNDED_TOTAL, true );
 			$coins            = max( 0, $refundable - $already_refunded );
@@ -2434,6 +2438,147 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			}
 
 			return $transaction_id;
+		}
+
+		/**
+		 * Refund a bucket-aware booking order back to the original consumed buckets.
+		 *
+		 * @param WC_Order $order      Order object.
+		 * @param string   $label      Ledger label.
+		 * @param string   $entry_type Ledger entry type.
+		 * @return bool
+		 */
+		private static function refund_order_bucket_consumption( $order, $label, $entry_type ) {
+			global $wpdb;
+
+			if ( ! $order instanceof WC_Order || $order->get_meta( self::META_REFUND_TXN, true ) ) {
+				return false;
+			}
+
+			$consumption = $order->get_meta( self::META_COIN_CONSUMPTION, true );
+
+			if ( ! is_array( $consumption ) || empty( $consumption ) ) {
+				return false;
+			}
+
+			$refundable       = self::get_order_refundable_coin_total( $order );
+			$already_refunded = (float) $order->get_meta( self::META_REFUNDED_TOTAL, true );
+			$remaining_refund = max( 0, $refundable - $already_refunded );
+
+			if ( $remaining_refund <= 0 ) {
+				return false;
+			}
+
+			$table          = self::get_buckets_table_name();
+			$user_id        = (int) $order->get_customer_id();
+			$now            = current_time( 'mysql' );
+			$total_refunded = 0.0;
+			$refunds        = array();
+
+			foreach ( $consumption as $used ) {
+				if ( $remaining_refund <= 0 ) {
+					break;
+				}
+
+				$bucket_id = ! empty( $used['bucket_id'] ) ? absint( $used['bucket_id'] ) : 0;
+				$amount    = isset( $used['amount'] ) ? min( (float) $used['amount'], $remaining_refund ) : 0.0;
+
+				if ( $bucket_id <= 0 || $amount <= 0 ) {
+					continue;
+				}
+
+				$bucket = $wpdb->get_row(
+					$wpdb->prepare(
+						"SELECT * FROM {$table} WHERE id = %d AND user_id = %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+						$bucket_id,
+						$user_id
+					)
+				);
+
+				if ( ! $bucket ) {
+					continue;
+				}
+
+				$new_remaining = min( (float) $bucket->original_amount, (float) $bucket->remaining_amount + $amount );
+				$actual_refund = max( 0, $new_remaining - (float) $bucket->remaining_amount );
+
+				if ( $actual_refund <= 0 ) {
+					continue;
+				}
+
+				$new_status = ( $bucket->expires_at && $bucket->expires_at <= $now ) ? 'expired' : 'active';
+
+				$updated = $wpdb->update(
+					$table,
+					array(
+						'remaining_amount' => self::format_zencoin_amount( $new_remaining ),
+						'status'           => $new_status,
+						'updated_at'       => $now,
+					),
+					array( 'id' => $bucket_id ),
+					array( '%f', '%s', '%s' ),
+					array( '%d' )
+				);
+
+				if ( false === $updated ) {
+					continue;
+				}
+
+				$ledger_id = self::add_zencoin_ledger_entry(
+					$user_id,
+					$actual_refund,
+					array(
+						'bucket_id'          => $bucket_id,
+						'entry_type'         => $entry_type,
+						'direction'          => 'credit',
+						'balance_after'      => self::get_zencoin_bucket_balance( $user_id ),
+						'label'              => $label,
+						'related_order_id'   => $order->get_id(),
+						'related_booking_id' => ! empty( $used['related_booking_id'] ) ? absint( $used['related_booking_id'] ) : null,
+						'metadata'           => array(
+							'order_number' => $order->get_order_number(),
+							'refunded_at'  => $now,
+							'expires_at'   => $bucket->expires_at,
+							'source_type'  => $bucket->source_type,
+						),
+					)
+				);
+
+				$refunds[] = array(
+					'bucket_id' => $bucket_id,
+					'ledger_id' => $ledger_id,
+					'amount'    => self::format_zencoin_amount( $actual_refund ),
+				);
+
+				$total_refunded   += $actual_refund;
+				$remaining_refund -= $actual_refund;
+			}
+
+			if ( $total_refunded <= 0 ) {
+				return false;
+			}
+
+			$transaction_id = self::mirror_wallet_credit(
+				$user_id,
+				$total_refunded,
+				sprintf( __( 'Coin refund for booking order #%s', 'coin-booking-bridge' ), $order->get_order_number() ),
+				$order->get_currency( 'edit' )
+			);
+
+			$order->update_meta_data( self::META_REFUND_TXN, $transaction_id ? $transaction_id : 'bucket_refund_only' );
+			$order->update_meta_data( self::META_REFUNDED_TOTAL, $already_refunded + $total_refunded );
+			$order->update_meta_data( '_cbb_coin_refund_consumption', $refunds );
+			$order->add_order_note(
+				sprintf(
+					/* translators: 1: coin amount, 2: transaction id */
+					__( 'Refunded %1$s booking coins to original buckets. Wallet transaction: %2$s.', 'coin-booking-bridge' ),
+					wc_format_decimal( $total_refunded ),
+					$transaction_id ? $transaction_id : __( 'not mirrored', 'coin-booking-bridge' )
+				)
+			);
+			$order->save();
+
+			return true;
 		}
 
 		/**
