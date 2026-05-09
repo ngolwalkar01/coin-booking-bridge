@@ -1287,6 +1287,11 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		 */
 		public static function credit_subscription_coins( $subscription ) {
 			$order = self::get_subscription_last_order( $subscription );
+
+			if ( $order && function_exists( 'wcs_order_contains_renewal' ) && wcs_order_contains_renewal( $order ) ) {
+				return;
+			}
+
 			self::credit_coins_for_order( $subscription, $order );
 		}
 
@@ -2032,6 +2037,17 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 					continue;
 				}
 
+				$wallet_transaction_id = self::mirror_wallet_debit(
+					$user_id,
+					$remaining,
+					sprintf(
+						/* translators: %s: subscription number */
+						__( 'Membership credits reset for subscription #%s', 'coin-booking-bridge' ),
+						is_object( $subscription ) && method_exists( $subscription, 'get_order_number' ) ? $subscription->get_order_number() : $subscription_id
+					),
+					$order instanceof WC_Order ? $order->get_currency( 'edit' ) : get_woocommerce_currency()
+				);
+
 				self::add_zencoin_ledger_entry(
 					$user_id,
 					$remaining,
@@ -2047,9 +2063,10 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 						'related_subscription_id' => $subscription_id,
 						'related_booking_id'      => $bucket->related_booking_id,
 						'metadata'                => array(
-							'reset_at'                 => $now,
+							'reset_at'                   => $now,
 							'original_bucket_expires_at' => $bucket->expires_at,
-							'subscription_number'      => is_object( $subscription ) && method_exists( $subscription, 'get_order_number' ) ? $subscription->get_order_number() : '',
+							'subscription_number'        => is_object( $subscription ) && method_exists( $subscription, 'get_order_number' ) ? $subscription->get_order_number() : '',
+							'wallet_transaction_id'      => $wallet_transaction_id,
 						),
 					)
 				);

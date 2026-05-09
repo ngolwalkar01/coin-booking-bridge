@@ -889,6 +889,8 @@ Included:
 - Before a new membership cycle bucket is granted, active remaining membership buckets for the same subscription are reset.
 - Reset buckets are marked `expired` and remaining ZC is set to zero.
 - Reset creates append-only ledger debit entries with entry type `membership_reset`.
+- Reset debits are mirrored to Tera Wallet when mirroring is enabled.
+- Renewal grants are protected from the Woo Subscriptions double-hook path where both generic payment-complete and renewal-payment-complete hooks can fire.
 - Renewal order notes show how many previous membership buckets were reset.
 
 Not included yet:
