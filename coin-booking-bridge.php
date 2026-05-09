@@ -44,6 +44,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		const META_COIN_ITEM_COST   = '_cbb_coin_item_cost';
 		const META_COIN_CONSUMPTION = '_cbb_coin_consumption';
 		const META_REFUNDED_TOTAL   = '_cbb_coins_refunded_total';
+		const META_LATE_CANCEL_TOTAL = '_cbb_late_cancel_no_refund_total';
 
 		/**
 		 * Boot plugin hooks.
@@ -115,6 +116,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 
 			add_action( 'woocommerce_order_status_cancelled', array( __CLASS__, 'refund_order_booking_coins' ), 20 );
 			add_action( 'woocommerce_order_status_refunded', array( __CLASS__, 'refund_order_booking_coins' ), 20 );
+			add_action( 'woocommerce_booking_cancelled', array( __CLASS__, 'refund_booking_coins' ), 20, 1 );
 			add_action( 'woocommerce_bookings_cancelled_booking', array( __CLASS__, 'refund_booking_coins' ), 20 );
 
 			add_filter( 'woocommerce_get_item_data', array( __CLASS__, 'display_cart_coin_cost' ), 20, 2 );
@@ -2335,9 +2337,10 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				return;
 			}
 
-			$refundable       = self::get_order_refundable_coin_total( $order );
-			$already_refunded = (float) $order->get_meta( self::META_REFUNDED_TOTAL, true );
-			$coins            = max( 0, $refundable - $already_refunded );
+			$refundable        = self::get_order_refundable_coin_total( $order );
+			$already_refunded  = (float) $order->get_meta( self::META_REFUNDED_TOTAL, true );
+			$late_no_refund    = (float) $order->get_meta( self::META_LATE_CANCEL_TOTAL, true );
+			$coins             = max( 0, $refundable - $already_refunded - $late_no_refund );
 
 			if ( $coins <= 0 ) {
 				return;
@@ -2386,9 +2389,21 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				return;
 			}
 
+			if ( self::is_late_booking_cancellation( $booking ) ) {
+				self::record_late_booking_cancellation( $booking, $order, $item_coin_cost );
+				return;
+			}
+
+			if ( $order->get_meta( self::META_COIN_CONSUMPTION, true ) && self::refund_order_bucket_consumption( $order, sprintf( __( 'Coin refund for booking #%s', 'coin-booking-bridge' ), $booking_id ), 'refund_on_time_cancel' ) ) {
+				$booking->update_meta_data( self::META_REFUND_TXN, 'bucket_refund' );
+				$booking->save();
+				return;
+			}
+
 			$refundable       = self::get_order_refundable_coin_total( $order );
 			$already_refunded = (float) $order->get_meta( self::META_REFUNDED_TOTAL, true );
-			$coins            = min( $item_coin_cost, max( 0, $refundable - $already_refunded ) );
+			$late_no_refund   = (float) $order->get_meta( self::META_LATE_CANCEL_TOTAL, true );
+			$coins            = min( $item_coin_cost, max( 0, $refundable - $already_refunded - $late_no_refund ) );
 
 			if ( $coins <= 0 ) {
 				return;
@@ -2441,6 +2456,83 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		}
 
 		/**
+		 * Check whether a booking cancellation is inside the no-refund cutoff.
+		 *
+		 * @param WC_Booking $booking Booking object.
+		 * @return bool
+		 */
+		private static function is_late_booking_cancellation( $booking ) {
+			if ( ! $booking || ! is_object( $booking ) || ! method_exists( $booking, 'get_start' ) ) {
+				return false;
+			}
+
+			$settings     = self::get_settings();
+			$cutoff_hours = isset( $settings['on_time_cancel_cutoff_hours'] ) ? absint( $settings['on_time_cancel_cutoff_hours'] ) : 12;
+			$start_time   = (int) $booking->get_start( 'edit' );
+
+			if ( $start_time <= 0 || $cutoff_hours <= 0 ) {
+				return false;
+			}
+
+			return ( current_time( 'timestamp' ) + ( $cutoff_hours * HOUR_IN_SECONDS ) ) > $start_time;
+		}
+
+		/**
+		 * Record a late cancellation without refunding consumed Zencoins.
+		 *
+		 * @param WC_Booking $booking Booking object.
+		 * @param WC_Order   $order   Order object.
+		 * @param float      $coins   Coin amount not refunded.
+		 */
+		private static function record_late_booking_cancellation( $booking, $order, $coins ) {
+			if ( ! $booking || ! ( $order instanceof WC_Order ) || $booking->get_meta( self::META_REFUND_TXN, true ) ) {
+				return;
+			}
+
+			$user_id = (int) $order->get_customer_id();
+			$coins   = (float) $coins;
+
+			if ( $user_id <= 0 || $coins <= 0 ) {
+				return;
+			}
+
+			$already_late = (float) $order->get_meta( self::META_LATE_CANCEL_TOTAL, true );
+			$settings     = self::get_settings();
+			$ledger_id    = self::add_zencoin_ledger_entry(
+				$user_id,
+				$coins,
+				array(
+					'entry_type'         => 'late_cancel',
+					'direction'          => 'debit',
+					'balance_after'      => self::get_zencoin_bucket_balance( $user_id ),
+					'label'              => __( 'Late cancellation - no Zencoin refund', 'coin-booking-bridge' ),
+					'related_order_id'   => $order->get_id(),
+					'related_booking_id' => method_exists( $booking, 'get_id' ) ? $booking->get_id() : null,
+					'metadata'           => array(
+						'order_number'      => $order->get_order_number(),
+						'booking_start'     => method_exists( $booking, 'get_start' ) ? $booking->get_start( 'edit' ) : '',
+						'cutoff_hours'      => isset( $settings['on_time_cancel_cutoff_hours'] ) ? absint( $settings['on_time_cancel_cutoff_hours'] ) : 12,
+						'no_balance_change' => true,
+					),
+				)
+			);
+
+			$order->update_meta_data( self::META_LATE_CANCEL_TOTAL, $already_late + $coins );
+			$order->add_order_note(
+				sprintf(
+					/* translators: 1: coin amount, 2: ledger id */
+					__( 'Late booking cancellation recorded. %1$s ZC were not refunded. Ledger entry: %2$s.', 'coin-booking-bridge' ),
+					wc_format_decimal( $coins ),
+					$ledger_id ? $ledger_id : __( 'not created', 'coin-booking-bridge' )
+				)
+			);
+			$order->save();
+
+			$booking->update_meta_data( self::META_REFUND_TXN, 'late_cancel_no_refund' );
+			$booking->save();
+		}
+
+		/**
 		 * Refund a bucket-aware booking order back to the original consumed buckets.
 		 *
 		 * @param WC_Order $order      Order object.
@@ -2463,7 +2555,8 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 
 			$refundable       = self::get_order_refundable_coin_total( $order );
 			$already_refunded = (float) $order->get_meta( self::META_REFUNDED_TOTAL, true );
-			$remaining_refund = max( 0, $refundable - $already_refunded );
+			$late_no_refund   = (float) $order->get_meta( self::META_LATE_CANCEL_TOTAL, true );
+			$remaining_refund = max( 0, $refundable - $already_refunded - $late_no_refund );
 
 			if ( $remaining_refund <= 0 ) {
 				return false;

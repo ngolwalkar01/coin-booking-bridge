@@ -477,6 +477,13 @@ Required admin screens:
 - Gift card redemption diagnostics.
 - Trial duplicate detection report.
 
+Future admin experience layer:
+
+- Create a clean, application-aware admin UI for bookings, bookable products, Zencoin products, wallet activity, and refund actions.
+- Hide or de-emphasize WooCommerce/Woo Bookings fields that are not useful for the Zenctuary flow.
+- Make Zencoin booking charges/refunds visible as first-class operational actions instead of relying on WooCommerce money refund UI.
+- This may live in CBB or in a separate companion admin plugin if separation stays cleaner.
+
 ## Public/Internal APIs
 
 Core service functions/classes should eventually expose:
@@ -915,6 +922,25 @@ Not included yet:
 - Booking-level on-time versus late cancellation cutoff.
 - Studio-cancel refund reason.
 - Partial booking-item bucket refunds.
+
+### Milestone 4.2: Late Cancellation No-Refund Guard
+
+Status: implemented in plugin version `0.2.0`.
+
+Included:
+
+- Booking cancellations now check the central `on_time_cancel_cutoff_hours` setting.
+- Late booking cancellations do not restore Zencoins.
+- Late cancellations create append-only ledger entries with entry type `late_cancel`.
+- Late cancellation amounts are stored on the order so later order-status refund hooks do not accidentally refund those Zencoins.
+- On-time booking cancellations can use the bucket-aware refund path from Milestone 4.1.
+
+Not included yet:
+
+- Custom customer-facing cancellation messages.
+- Admin booking/order Zencoin refund panel.
+- Studio-cancel bulk refund handling.
+- Partial multi-booking order refund UI.
 
 ## Open Questions
 
