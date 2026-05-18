@@ -1090,7 +1090,25 @@ Not included yet:
 
 #### Milestone 6.1: Mixed Recovery Booking Orchestration
 
-Planned scope:
+Status: in progress.
+
+Implemented first slice in plugin version `0.2.5`.
+
+Included so far:
+
+- Mixed-recovery orders now store checkout intent metadata at order-creation time.
+- Order stores `_cbb_checkout_mode` for current checkout classification.
+- Mixed-recovery orders store `_cbb_mixed_recovery_intent` snapshot including:
+  - required ZC
+  - available ZC
+  - missing ZC
+  - booking items
+  - recovery credit products
+  - wallet frozen state
+  - captured timestamp
+- Mixed-recovery orders add an order note recording the captured shortage snapshot.
+
+Still planned:
 
 - For mixed carts, ensure purchased Zencoins are granted before booking debit is finalized.
 - Re-check booking availability and wallet freeze rules after payment and before final booking completion.
