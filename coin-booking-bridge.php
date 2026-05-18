@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Coin Booking Bridge
  * Description: MVP bridge for WooCommerce Memberships, Subscriptions, Bookings, and Tera Wallet coin-based bookings.
- * Version: 0.2.2
+ * Version: 0.2.3
  * Author: Custom
  * Text Domain: coin-booking-bridge
  *
@@ -14,7 +14,7 @@ defined( 'ABSPATH' ) || exit;
 if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 	final class CBB_Coin_Booking_Bridge {
 
-		const VERSION           = '0.2.2';
+		const VERSION           = '0.2.3';
 		const DB_VERSION        = '2026050801';
 		const OPTION_DB_VERSION = 'cbb_db_version';
 		const OPTION_SETTINGS   = 'cbb_zencoin_settings';
@@ -2988,7 +2988,15 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		private static function get_checkout_context_credit_product_type( $product_id, $product = null ) {
 			$type = $product_id > 0 ? (string) get_post_meta( $product_id, self::META_PRODUCT_TYPE, true ) : 'none';
 
+			if ( 'none' === $type && $product && class_exists( 'WC_Subscriptions_Product' ) && WC_Subscriptions_Product::is_subscription( $product ) ) {
+				$type = 'membership';
+			}
+
 			if ( 'none' === $type && $product && method_exists( $product, 'is_type' ) && ( $product->is_type( 'subscription' ) || $product->is_type( 'variable-subscription' ) || $product->is_type( 'subscription_variation' ) ) ) {
+				$type = 'membership';
+			}
+
+			if ( 'none' === $type && $product_id > 0 && (float) get_post_meta( $product_id, self::META_GRANT_AMOUNT, true ) > 0 ) {
 				$type = 'membership';
 			}
 
