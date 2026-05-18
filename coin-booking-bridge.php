@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Coin Booking Bridge
  * Description: MVP bridge for WooCommerce Memberships, Subscriptions, Bookings, and Tera Wallet coin-based bookings.
- * Version: 0.2.5
+ * Version: 0.2.6
  * Author: Custom
  * Text Domain: coin-booking-bridge
  *
@@ -14,7 +14,7 @@ defined( 'ABSPATH' ) || exit;
 if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 	final class CBB_Coin_Booking_Bridge {
 
-		const VERSION           = '0.2.5';
+		const VERSION           = '0.2.6';
 		const DB_VERSION        = '2026050801';
 		const OPTION_DB_VERSION = 'cbb_db_version';
 		const OPTION_SETTINGS   = 'cbb_zencoin_settings';
@@ -2188,6 +2188,12 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 
 			if ( self::is_wallet_frozen_for_user( $user_id ) ) {
 				self::add_validation_error( __( 'Your Zencoin wallet is temporarily paused because a membership subscription is on hold. Please update your membership before booking with coins.', 'coin-booking-bridge' ), $errors );
+				return;
+			}
+
+			$context = self::get_checkout_context( $user_id );
+
+			if ( 'mixed_recovery' === ( isset( $context['mode'] ) ? $context['mode'] : '' ) ) {
 				return;
 			}
 
