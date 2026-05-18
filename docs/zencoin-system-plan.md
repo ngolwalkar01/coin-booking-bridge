@@ -1051,7 +1051,9 @@ Not included yet:
 
 #### Milestone 5.2: Recovery Product Eligibility Rules
 
-Planned scope:
+Status: implemented in plugin version `0.2.2`.
+
+Included:
 
 - Define which product types can satisfy a booking shortage:
   - membership
@@ -1060,6 +1062,31 @@ Planned scope:
   - later gift-card/top-up flows when ready
 - Separate prompt-only insufficient state from actual mixed recovery checkout state.
 - Keep non-CBB environments on a safe generic checkout fallback.
+
+Included details:
+
+- Checkout context now distinguishes:
+  - `has_credit_products`
+  - `has_recovery_products`
+  - `recovery_credit_products`
+  - `non_recovery_credit_products`
+- Current recovery-eligible product types:
+  - `membership`
+  - `package`
+  - `drop_in`
+- Current non-recovery product types in this phase:
+  - `free_drop_in`
+  - `gift_card`
+  - `auto_top_up`
+  - any other credit product types outside the allowed recovery set
+- `mixed_recovery` mode now requires recovery-eligible credit products, not merely any credit product in cart.
+- `insufficient_prompt` remains the mode when a booking is short on ZC and no recovery-eligible credit product is present.
+
+Not included yet:
+
+- Dynamic recovery eligibility by booking subtype or member plan.
+- Missing-ZC pricing logic.
+- Final UI branching inside `zen-checkout-flow`.
 
 #### Milestone 6.1: Mixed Recovery Booking Orchestration
 

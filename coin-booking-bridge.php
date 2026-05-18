@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Coin Booking Bridge
  * Description: MVP bridge for WooCommerce Memberships, Subscriptions, Bookings, and Tera Wallet coin-based bookings.
- * Version: 0.2.1
+ * Version: 0.2.2
  * Author: Custom
  * Text Domain: coin-booking-bridge
  *
@@ -14,7 +14,7 @@ defined( 'ABSPATH' ) || exit;
 if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 	final class CBB_Coin_Booking_Bridge {
 
-		const VERSION           = '0.2.1';
+		const VERSION           = '0.2.2';
 		const DB_VERSION        = '2026050801';
 		const OPTION_DB_VERSION = 'cbb_db_version';
 		const OPTION_SETTINGS   = 'cbb_zencoin_settings';
@@ -2710,11 +2710,14 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				'mode'                         => 'money_purchase',
 				'has_booking_items'            => false,
 				'has_credit_products'          => false,
+				'has_recovery_products'        => false,
 				'required_zencoins'            => 0.0,
 				'available_zencoins'           => $user_id > 0 ? self::get_available_coin_balance( $user_id ) : 0.0,
 				'missing_zencoins'             => 0.0,
 				'booking_items'                => array(),
 				'credit_products'              => array(),
+				'recovery_credit_products'     => array(),
+				'non_recovery_credit_products' => array(),
 				'allowed_recovery_product_types' => array( 'membership', 'package', 'drop_in' ),
 				'wallet_is_frozen'             => $user_id > 0 ? self::is_wallet_frozen_for_user( $user_id ) : false,
 				'blocking_reason'              => '',
@@ -2734,8 +2737,16 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				}
 
 				if ( self::is_credit_purchase_cart_item( $cart_item ) ) {
-					$context['has_credit_products'] = true;
-					$context['credit_products'][]   = self::build_checkout_context_credit_item( $cart_item_key, $cart_item );
+					$credit_item                      = self::build_checkout_context_credit_item( $cart_item_key, $cart_item, $context['allowed_recovery_product_types'] );
+					$context['has_credit_products']   = true;
+					$context['credit_products'][]     = $credit_item;
+
+					if ( ! empty( $credit_item['is_recovery_eligible'] ) ) {
+						$context['has_recovery_products']    = true;
+						$context['recovery_credit_products'][] = $credit_item;
+					} else {
+						$context['non_recovery_credit_products'][] = $credit_item;
+					}
 				}
 			}
 
@@ -2768,7 +2779,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 					return 'zencoin_booking';
 				}
 
-				if ( ! empty( $context['has_credit_products'] ) ) {
+				if ( ! empty( $context['has_recovery_products'] ) ) {
 					return 'mixed_recovery';
 				}
 
@@ -2864,6 +2875,17 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		}
 
 		/**
+		 * Check whether a credit product type is eligible to recover a booking shortage.
+		 *
+		 * @param string $product_type Product type.
+		 * @param array  $allowed_types Allowed recovery product types.
+		 * @return bool
+		 */
+		private static function is_recovery_eligible_product_type( $product_type, $allowed_types ) {
+			return in_array( $product_type, $allowed_types, true );
+		}
+
+		/**
 		 * Get product/variation ID for a cart item.
 		 *
 		 * @param array $cart_item Cart item.
@@ -2940,23 +2962,37 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		 * @param array  $cart_item     Cart item.
 		 * @return array
 		 */
-		private static function build_checkout_context_credit_item( $cart_item_key, $cart_item ) {
+		private static function build_checkout_context_credit_item( $cart_item_key, $cart_item, $allowed_types = array() ) {
 			$product    = ! empty( $cart_item['data'] ) && is_object( $cart_item['data'] ) ? $cart_item['data'] : null;
 			$product_id = self::get_cart_item_product_id( $cart_item );
-			$type       = $product_id > 0 ? (string) get_post_meta( $product_id, self::META_PRODUCT_TYPE, true ) : 'none';
+			$type       = self::get_checkout_context_credit_product_type( $product_id, $product );
+
+			return array(
+				'cart_item_key'         => (string) $cart_item_key,
+				'product_id'            => $product_id,
+				'product_name'          => $product && method_exists( $product, 'get_name' ) ? $product->get_name() : '',
+				'quantity'              => isset( $cart_item['quantity'] ) ? max( 1, (int) $cart_item['quantity'] ) : 1,
+				'product_type'          => $type ? $type : 'none',
+				'granted_zencoins'      => self::get_cart_item_coin_grant_amount( $cart_item ),
+				'is_recovery_eligible'  => self::is_recovery_eligible_product_type( $type, $allowed_types ),
+			);
+		}
+
+		/**
+		 * Resolve normalized checkout-context credit product type.
+		 *
+		 * @param int             $product_id Product ID.
+		 * @param WC_Product|null $product    Product object.
+		 * @return string
+		 */
+		private static function get_checkout_context_credit_product_type( $product_id, $product = null ) {
+			$type = $product_id > 0 ? (string) get_post_meta( $product_id, self::META_PRODUCT_TYPE, true ) : 'none';
 
 			if ( 'none' === $type && $product && method_exists( $product, 'is_type' ) && ( $product->is_type( 'subscription' ) || $product->is_type( 'variable-subscription' ) || $product->is_type( 'subscription_variation' ) ) ) {
 				$type = 'membership';
 			}
 
-			return array(
-				'cart_item_key'    => (string) $cart_item_key,
-				'product_id'       => $product_id,
-				'product_name'     => $product && method_exists( $product, 'get_name' ) ? $product->get_name() : '',
-				'quantity'         => isset( $cart_item['quantity'] ) ? max( 1, (int) $cart_item['quantity'] ) : 1,
-				'product_type'     => $type ? $type : 'none',
-				'granted_zencoins' => self::get_cart_item_coin_grant_amount( $cart_item ),
-			);
+			return $type ? $type : 'none';
 		}
 
 		/**
@@ -2970,7 +3006,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				return 'wallet_frozen';
 			}
 
-			if ( ! empty( $context['has_booking_items'] ) && (float) $context['missing_zencoins'] > 0 && empty( $context['has_credit_products'] ) ) {
+			if ( ! empty( $context['has_booking_items'] ) && (float) $context['missing_zencoins'] > 0 && empty( $context['has_recovery_products'] ) ) {
 				return 'insufficient_zencoins';
 			}
 
