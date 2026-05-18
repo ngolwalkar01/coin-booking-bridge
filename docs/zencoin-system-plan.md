@@ -90,7 +90,20 @@ CBB becomes responsible for:
 - Package/drop-in/free-trial grants.
 - Gift card redemption into ZC.
 - Top-up and insufficient-balance rules.
+- Cart/checkout mode classification for Zencoin-aware flows.
+- Checkout context data for external UI consumers.
 - Admin tools and reporting.
+
+### Zen Checkout Flow
+
+`zen-checkout-flow` remains responsible for:
+
+- Popup checkout rendering and interaction states.
+- Conditional presentation of money-payment versus Zencoin-booking flows.
+- Guided recovery UX when users are short on Zencoins.
+- Theme/auth handoff for logged-out checkout access.
+
+`zen-checkout-flow` should not become the source of truth for wallet, booking-pricing, or Zencoin entitlement rules. It should consume a small CBB context API when CBB is present, and gracefully fall back to generic WooCommerce popup checkout behavior when CBB is absent.
 
 ## Core Data Model
 
@@ -498,8 +511,38 @@ Core service functions/classes should eventually expose:
 - `sync_tera_wallet_balance( $user_id )`
 - `get_booking_coin_cost( $product_or_booking )`
 - `can_user_book_with_zc( $user_id, $booking_context )`
+- `get_checkout_context( $user_id = 0, $args = array() )`
+- `classify_cart_mode( $user_id = 0, $args = array() )`
 
 Design goal: the booking flow, checkout flow, wallet UI, and admin tools should all call the same services.
+
+### Checkout Context Contract
+
+For reusable integrations such as `zen-checkout-flow`, CBB should expose a lightweight checkout context structure.
+
+Suggested fields:
+
+- `mode`
+  - `money_purchase`
+  - `zencoin_booking`
+  - `mixed_recovery`
+  - `insufficient_prompt`
+- `has_booking_items`
+- `has_credit_products`
+- `required_zencoins`
+- `available_zencoins`
+- `missing_zencoins`
+- `booking_items`
+- `credit_products`
+- `allowed_recovery_product_types`
+- `wallet_is_frozen`
+- `blocking_reason`
+
+Design goal:
+
+- CBB owns the business logic and cart classification.
+- `zen-checkout-flow` owns the popup rendering and UI states.
+- Both plugins remain independently installable.
 
 ## Hook Map
 
@@ -616,6 +659,7 @@ Tasks:
 - One-click booking when enough ZC.
 - Waitlist join when full.
 - Booking failure recovery message.
+- Expose reusable booking/checkout context for external UI consumers.
 
 ### Milestone 6: Insufficient ZC Purchase Flows
 
@@ -623,12 +667,33 @@ Goal: implement client purchase flows during booking.
 
 Tasks:
 
+- Add cart mode detection for:
+  - `money_purchase`
+  - `zencoin_booking`
+  - `mixed_recovery`
+  - `insufficient_prompt`
+- Classify bookings with insufficient balance as either:
+  - prompt-only state before a recovery product is added
+  - mixed recovery checkout once a recovery product is in cart
 - Missing 1-2 ZC popup for standard sessions.
 - Choose-your-plan for standard sessions missing 3+ ZC or 0 ZC.
 - Workshop/event missing amount checkout.
 - Member-only booking top-up price.
 - Auto-complete booking after top-up payment.
 - Leave purchased ZC in wallet if booking fails after payment.
+
+### Milestone 6.5: Checkout Integration Contract
+
+Goal: support external checkout UIs without coupling CBB to any one site.
+
+Tasks:
+
+- Publish a stable `get_checkout_context()` API/adapter.
+- Mark booking items, credit products, and recovery-eligible items in a reusable way.
+- Let external checkout UIs detect when gateways should be hidden.
+- Let external checkout UIs detect when recovery purchase UI should be shown.
+- Keep fallback behavior sane when `zen-checkout-flow` is inactive.
+- Document mixed-cart orchestration: grant purchased ZC first, then complete booking debit.
 
 ### Milestone 7: Gift Cards
 
@@ -941,6 +1006,75 @@ Not included yet:
 - Admin booking/order Zencoin refund panel.
 - Studio-cancel bulk refund handling.
 - Partial multi-booking order refund UI.
+
+### Planned Next Track: Checkout Context and Conditional Flow Support
+
+Not started yet.
+
+Purpose:
+
+- Prepare CBB as the source of truth for conditional checkout modes used by `zen-checkout-flow` and any future checkout UI.
+
+Planned sub-milestones:
+
+#### Milestone 5.1: Checkout Context Detection API
+
+Status: implemented in plugin version `0.2.1`.
+
+Included:
+
+- Add reusable cart classification helpers in CBB.
+- Detect whether the cart contains booking items, credit-purchase items, or both.
+- Calculate required, available, and missing Zencoins for the current customer/cart.
+- Return a normalized checkout context object/array for UI consumers.
+
+Included details:
+
+- Public CBB checkout context API:
+  - `CBB_Coin_Booking_Bridge::get_checkout_context()`
+  - `CBB_Coin_Booking_Bridge::classify_cart_mode()`
+  - `cbb_get_checkout_context()`
+  - `cbb_classify_cart_mode()`
+- Normalized modes:
+  - `money_purchase`
+  - `zencoin_booking`
+  - `mixed_recovery`
+  - `insufficient_prompt`
+- Context fields for booking items, credit products, required/available/missing ZC, wallet frozen state, and blocking reason.
+- Read-only implementation only; no live checkout rendering or booking/payment behavior changed yet.
+
+Not included yet:
+
+- Recovery product eligibility restrictions beyond basic product-type grouping.
+- UI consumption inside `zen-checkout-flow`.
+- Mixed-cart orchestration that grants ZC before final booking debit.
+
+#### Milestone 5.2: Recovery Product Eligibility Rules
+
+Planned scope:
+
+- Define which product types can satisfy a booking shortage:
+  - membership
+  - package
+  - drop-in
+  - later gift-card/top-up flows when ready
+- Separate prompt-only insufficient state from actual mixed recovery checkout state.
+- Keep non-CBB environments on a safe generic checkout fallback.
+
+#### Milestone 6.1: Mixed Recovery Booking Orchestration
+
+Planned scope:
+
+- For mixed carts, ensure purchased Zencoins are granted before booking debit is finalized.
+- Re-check booking availability and wallet freeze rules after payment and before final booking completion.
+- If payment succeeds but booking completion fails, leave purchased ZC in wallet and show recovery guidance.
+
+#### Milestone 6.2: Checkout UI Consumer Documentation
+
+Planned scope:
+
+- Document how `zen-checkout-flow` should consume the checkout context API.
+- Keep the contract generic so other checkout UIs can reuse it outside this site.
 
 ## Open Questions
 

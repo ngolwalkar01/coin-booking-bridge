@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Coin Booking Bridge
  * Description: MVP bridge for WooCommerce Memberships, Subscriptions, Bookings, and Tera Wallet coin-based bookings.
- * Version: 0.2.0
+ * Version: 0.2.1
  * Author: Custom
  * Text Domain: coin-booking-bridge
  *
@@ -14,7 +14,7 @@ defined( 'ABSPATH' ) || exit;
 if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 	final class CBB_Coin_Booking_Bridge {
 
-		const VERSION           = '0.2.0';
+		const VERSION           = '0.2.1';
 		const DB_VERSION        = '2026050801';
 		const OPTION_DB_VERSION = 'cbb_db_version';
 		const OPTION_SETTINGS   = 'cbb_zencoin_settings';
@@ -2693,6 +2693,92 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		}
 
 		/**
+		 * Get normalized checkout context for the current cart.
+		 *
+		 * This is a read-only API for external UI consumers such as custom
+		 * checkout flows. It does not alter runtime checkout behavior.
+		 *
+		 * @param int   $user_id Optional user ID override.
+		 * @param array $args    Optional context arguments.
+		 * @return array
+		 */
+		public static function get_checkout_context( $user_id = 0, $args = array() ) {
+			$cart = isset( $args['cart'] ) && $args['cart'] instanceof WC_Cart ? $args['cart'] : ( function_exists( 'WC' ) ? WC()->cart : null );
+
+			$user_id = $user_id > 0 ? (int) $user_id : get_current_user_id();
+			$context = array(
+				'mode'                         => 'money_purchase',
+				'has_booking_items'            => false,
+				'has_credit_products'          => false,
+				'required_zencoins'            => 0.0,
+				'available_zencoins'           => $user_id > 0 ? self::get_available_coin_balance( $user_id ) : 0.0,
+				'missing_zencoins'             => 0.0,
+				'booking_items'                => array(),
+				'credit_products'              => array(),
+				'allowed_recovery_product_types' => array( 'membership', 'package', 'drop_in' ),
+				'wallet_is_frozen'             => $user_id > 0 ? self::is_wallet_frozen_for_user( $user_id ) : false,
+				'blocking_reason'              => '',
+			);
+
+			if ( ! $cart instanceof WC_Cart || $cart->is_empty() ) {
+				return (array) apply_filters( 'cbb_checkout_context', $context, $user_id, $args, $cart );
+			}
+
+			foreach ( $cart->get_cart() as $cart_item_key => $cart_item ) {
+				if ( self::is_coin_booking_cart_item( $cart_item ) ) {
+					$context['has_booking_items'] = true;
+					$item_cost                    = self::get_cart_item_coin_cost( $cart_item );
+					$context['required_zencoins'] += $item_cost;
+					$context['booking_items'][]   = self::build_checkout_context_booking_item( $cart_item_key, $cart_item, $item_cost );
+					continue;
+				}
+
+				if ( self::is_credit_purchase_cart_item( $cart_item ) ) {
+					$context['has_credit_products'] = true;
+					$context['credit_products'][]   = self::build_checkout_context_credit_item( $cart_item_key, $cart_item );
+				}
+			}
+
+			$context['required_zencoins'] = self::normalize_zencoin_amount( $context['required_zencoins'] );
+			$context['missing_zencoins']  = self::normalize_zencoin_amount( max( 0, $context['required_zencoins'] - $context['available_zencoins'] ) );
+			$context['mode']              = self::classify_cart_mode( $user_id, $context );
+			$context['blocking_reason']   = self::get_checkout_context_blocking_reason( $context );
+
+			return (array) apply_filters( 'cbb_checkout_context', $context, $user_id, $args, $cart );
+		}
+
+		/**
+		 * Classify the current cart into a checkout mode.
+		 *
+		 * @param int   $user_id Optional user ID override.
+		 * @param array $context Optional pre-built context.
+		 * @return string
+		 */
+		public static function classify_cart_mode( $user_id = 0, $context = array() ) {
+			if ( empty( $context ) ) {
+				$context = self::get_checkout_context( $user_id );
+			}
+
+			if ( ! empty( $context['has_booking_items'] ) ) {
+				if ( ! empty( $context['wallet_is_frozen'] ) ) {
+					return 'insufficient_prompt';
+				}
+
+				if ( (float) $context['missing_zencoins'] <= 0 ) {
+					return 'zencoin_booking';
+				}
+
+				if ( ! empty( $context['has_credit_products'] ) ) {
+					return 'mixed_recovery';
+				}
+
+				return 'insufficient_prompt';
+			}
+
+			return 'money_purchase';
+		}
+
+		/**
 		 * Get cart coin total.
 		 *
 		 * @return float
@@ -2716,11 +2802,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		 * @return float
 		 */
 		private static function get_cart_item_coin_cost( $cart_item ) {
-			$product_id = ! empty( $cart_item['product_id'] ) ? (int) $cart_item['product_id'] : 0;
-
-			if ( ! $product_id && ! empty( $cart_item['data'] ) && is_object( $cart_item['data'] ) && method_exists( $cart_item['data'], 'get_id' ) ) {
-				$product_id = (int) $cart_item['data']->get_id();
-			}
+			$product_id = self::get_cart_item_product_id( $cart_item );
 
 			$cost       = $product_id ? (float) get_post_meta( $product_id, self::META_BOOKING_COST, true ) : 0.0;
 			$quantity   = isset( $cart_item['quantity'] ) ? max( 1, (float) $cart_item['quantity'] ) : 1;
@@ -2758,6 +2840,151 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			}
 
 			return is_a( $product, 'WC_Product_Booking' );
+		}
+
+		/**
+		 * Check whether a cart item is a Zencoin credit purchase item.
+		 *
+		 * @param array $cart_item Cart item.
+		 * @return bool
+		 */
+		private static function is_credit_purchase_cart_item( $cart_item ) {
+			$product_id = self::get_cart_item_product_id( $cart_item );
+
+			if ( $product_id <= 0 ) {
+				return false;
+			}
+
+			$product_type = (string) get_post_meta( $product_id, self::META_PRODUCT_TYPE, true );
+			if ( in_array( $product_type, array( 'package', 'drop_in', 'free_drop_in', 'gift_card', 'auto_top_up' ), true ) ) {
+				return true;
+			}
+
+			return self::get_cart_item_coin_grant_amount( $cart_item ) > 0;
+		}
+
+		/**
+		 * Get product/variation ID for a cart item.
+		 *
+		 * @param array $cart_item Cart item.
+		 * @return int
+		 */
+		private static function get_cart_item_product_id( $cart_item ) {
+			$variation_id = ! empty( $cart_item['variation_id'] ) ? (int) $cart_item['variation_id'] : 0;
+			$product_id   = ! empty( $cart_item['product_id'] ) ? (int) $cart_item['product_id'] : 0;
+
+			if ( $variation_id > 0 ) {
+				return $variation_id;
+			}
+
+			if ( $product_id > 0 ) {
+				return $product_id;
+			}
+
+			if ( ! empty( $cart_item['data'] ) && is_object( $cart_item['data'] ) && method_exists( $cart_item['data'], 'get_id' ) ) {
+				return (int) $cart_item['data']->get_id();
+			}
+
+			return 0;
+		}
+
+		/**
+		 * Get Zencoin grant amount represented by a cart item.
+		 *
+		 * @param array $cart_item Cart item.
+		 * @return float
+		 */
+		private static function get_cart_item_coin_grant_amount( $cart_item ) {
+			$product_id = self::get_cart_item_product_id( $cart_item );
+
+			if ( $product_id <= 0 ) {
+				return 0.0;
+			}
+
+			$grant_amount = (float) get_post_meta( $product_id, self::META_ZC_GRANT_AMOUNT, true );
+
+			if ( $grant_amount <= 0 ) {
+				$grant_amount = (float) get_post_meta( $product_id, self::META_GRANT_AMOUNT, true );
+			}
+
+			$quantity = isset( $cart_item['quantity'] ) ? max( 1, (float) $cart_item['quantity'] ) : 1;
+
+			return self::normalize_zencoin_amount( $grant_amount * $quantity );
+		}
+
+		/**
+		 * Build checkout-context data for a booking cart item.
+		 *
+		 * @param string $cart_item_key Cart item key.
+		 * @param array  $cart_item     Cart item.
+		 * @param float  $item_cost     Required Zencoins.
+		 * @return array
+		 */
+		private static function build_checkout_context_booking_item( $cart_item_key, $cart_item, $item_cost ) {
+			$product    = ! empty( $cart_item['data'] ) && is_object( $cart_item['data'] ) ? $cart_item['data'] : null;
+			$product_id = self::get_cart_item_product_id( $cart_item );
+
+			return array(
+				'cart_item_key'    => (string) $cart_item_key,
+				'product_id'       => $product_id,
+				'product_name'     => $product && method_exists( $product, 'get_name' ) ? $product->get_name() : '',
+				'quantity'         => isset( $cart_item['quantity'] ) ? max( 1, (int) $cart_item['quantity'] ) : 1,
+				'required_zencoins' => self::normalize_zencoin_amount( $item_cost ),
+			);
+		}
+
+		/**
+		 * Build checkout-context data for a Zencoin credit cart item.
+		 *
+		 * @param string $cart_item_key Cart item key.
+		 * @param array  $cart_item     Cart item.
+		 * @return array
+		 */
+		private static function build_checkout_context_credit_item( $cart_item_key, $cart_item ) {
+			$product    = ! empty( $cart_item['data'] ) && is_object( $cart_item['data'] ) ? $cart_item['data'] : null;
+			$product_id = self::get_cart_item_product_id( $cart_item );
+			$type       = $product_id > 0 ? (string) get_post_meta( $product_id, self::META_PRODUCT_TYPE, true ) : 'none';
+
+			if ( 'none' === $type && $product && method_exists( $product, 'is_type' ) && ( $product->is_type( 'subscription' ) || $product->is_type( 'variable-subscription' ) || $product->is_type( 'subscription_variation' ) ) ) {
+				$type = 'membership';
+			}
+
+			return array(
+				'cart_item_key'    => (string) $cart_item_key,
+				'product_id'       => $product_id,
+				'product_name'     => $product && method_exists( $product, 'get_name' ) ? $product->get_name() : '',
+				'quantity'         => isset( $cart_item['quantity'] ) ? max( 1, (int) $cart_item['quantity'] ) : 1,
+				'product_type'     => $type ? $type : 'none',
+				'granted_zencoins' => self::get_cart_item_coin_grant_amount( $cart_item ),
+			);
+		}
+
+		/**
+		 * Get a human/machine readable blocking reason for checkout context.
+		 *
+		 * @param array $context Checkout context.
+		 * @return string
+		 */
+		private static function get_checkout_context_blocking_reason( $context ) {
+			if ( ! empty( $context['wallet_is_frozen'] ) ) {
+				return 'wallet_frozen';
+			}
+
+			if ( ! empty( $context['has_booking_items'] ) && (float) $context['missing_zencoins'] > 0 && empty( $context['has_credit_products'] ) ) {
+				return 'insufficient_zencoins';
+			}
+
+			return '';
+		}
+
+		/**
+		 * Normalize Zencoin amount shape for public context output.
+		 *
+		 * @param float $amount Amount.
+		 * @return float
+		 */
+		private static function normalize_zencoin_amount( $amount ) {
+			return (float) wc_format_decimal( (float) $amount, 6 );
 		}
 
 		/**
@@ -2904,4 +3131,30 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 	register_activation_hook( __FILE__, array( 'CBB_Coin_Booking_Bridge', 'activate' ) );
 	register_deactivation_hook( __FILE__, array( 'CBB_Coin_Booking_Bridge', 'deactivate' ) );
 	CBB_Coin_Booking_Bridge::init();
+}
+
+if ( ! function_exists( 'cbb_get_checkout_context' ) ) {
+	/**
+	 * Public helper for external UI consumers.
+	 *
+	 * @param int   $user_id Optional user ID override.
+	 * @param array $args    Optional context arguments.
+	 * @return array
+	 */
+	function cbb_get_checkout_context( $user_id = 0, $args = array() ) {
+		return class_exists( 'CBB_Coin_Booking_Bridge' ) ? CBB_Coin_Booking_Bridge::get_checkout_context( $user_id, $args ) : array();
+	}
+}
+
+if ( ! function_exists( 'cbb_classify_cart_mode' ) ) {
+	/**
+	 * Public helper for external UI consumers.
+	 *
+	 * @param int   $user_id Optional user ID override.
+	 * @param array $context Optional pre-built checkout context.
+	 * @return string
+	 */
+	function cbb_classify_cart_mode( $user_id = 0, $context = array() ) {
+		return class_exists( 'CBB_Coin_Booking_Bridge' ) ? CBB_Coin_Booking_Bridge::classify_cart_mode( $user_id, $context ) : 'money_purchase';
+	}
 }
