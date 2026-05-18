@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Coin Booking Bridge
  * Description: MVP bridge for WooCommerce Memberships, Subscriptions, Bookings, and Tera Wallet coin-based bookings.
- * Version: 0.2.6
+ * Version: 0.2.7
  * Author: Custom
  * Text Domain: coin-booking-bridge
  *
@@ -14,7 +14,7 @@ defined( 'ABSPATH' ) || exit;
 if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 	final class CBB_Coin_Booking_Bridge {
 
-		const VERSION           = '0.2.6';
+		const VERSION           = '0.2.7';
 		const DB_VERSION        = '2026050801';
 		const OPTION_DB_VERSION = 'cbb_db_version';
 		const OPTION_SETTINGS   = 'cbb_zencoin_settings';
@@ -109,7 +109,8 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			add_action( 'woocommerce_before_calculate_totals', array( __CLASS__, 'zero_coin_booking_prices' ), 999 );
 			add_action( 'woocommerce_check_cart_items', array( __CLASS__, 'validate_cart_coin_balance' ), 20 );
 			add_action( 'woocommerce_after_checkout_validation', array( __CLASS__, 'validate_checkout_coin_balance' ), 20, 2 );
-			add_action( 'woocommerce_checkout_create_order', array( __CLASS__, 'store_checkout_context_on_order' ), 20, 2 );
+			add_action( 'woocommerce_checkout_order_processed', array( __CLASS__, 'store_checkout_context_on_processed_order' ), 20, 3 );
+			add_action( 'woocommerce_store_api_checkout_order_processed', array( __CLASS__, 'store_checkout_context_on_processed_order' ), 20, 1 );
 			add_action( 'woocommerce_checkout_create_order_line_item', array( __CLASS__, 'store_order_item_coin_cost' ), 20, 4 );
 			add_action( 'woocommerce_checkout_order_processed', array( __CLASS__, 'debit_order_booking_coins' ), 30, 3 );
 			add_action( 'woocommerce_store_api_checkout_order_processed', array( __CLASS__, 'debit_order_booking_coins' ), 30, 1 );
@@ -2235,8 +2236,14 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		 * @param array    $data  Posted checkout data.
 		 * @return void
 		 */
-		public static function store_checkout_context_on_order( $order, $data ) {
-			if ( ! $order instanceof WC_Order ) {
+		public static function store_checkout_context_on_processed_order( $order_id, $data = array(), $order = null ) {
+			if ( $order_id instanceof WC_Order ) {
+				$order = $order_id;
+			} else {
+				$order = $order instanceof WC_Order ? $order : wc_get_order( $order_id );
+			}
+
+			if ( ! $order || $order->get_meta( self::META_CHECKOUT_MODE, true ) ) {
 				return;
 			}
 
@@ -2245,30 +2252,30 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 
 			$order->update_meta_data( self::META_CHECKOUT_MODE, $mode );
 
-			if ( 'mixed_recovery' !== $mode ) {
-				return;
+			if ( 'mixed_recovery' === $mode ) {
+				$intent = array(
+					'mode'                     => $mode,
+					'required_zencoins'        => isset( $context['required_zencoins'] ) ? self::normalize_zencoin_amount( $context['required_zencoins'] ) : 0.0,
+					'available_zencoins'       => isset( $context['available_zencoins'] ) ? self::normalize_zencoin_amount( $context['available_zencoins'] ) : 0.0,
+					'missing_zencoins'         => isset( $context['missing_zencoins'] ) ? self::normalize_zencoin_amount( $context['missing_zencoins'] ) : 0.0,
+					'wallet_is_frozen'         => ! empty( $context['wallet_is_frozen'] ),
+					'blocking_reason'          => isset( $context['blocking_reason'] ) ? sanitize_key( $context['blocking_reason'] ) : '',
+					'booking_items'            => ! empty( $context['booking_items'] ) ? array_values( $context['booking_items'] ) : array(),
+					'recovery_credit_products' => ! empty( $context['recovery_credit_products'] ) ? array_values( $context['recovery_credit_products'] ) : array(),
+					'captured_at_gmt'          => gmdate( 'Y-m-d H:i:s' ),
+				);
+
+				$order->update_meta_data( self::META_RECOVERY_INTENT, $intent );
+				$order->add_order_note(
+					sprintf(
+						/* translators: %s: missing zencoin amount */
+						__( 'Mixed recovery checkout intent captured. Missing ZC at checkout: %s.', 'coin-booking-bridge' ),
+						wc_format_decimal( $intent['missing_zencoins'] )
+					)
+				);
 			}
 
-			$intent = array(
-				'mode'                     => $mode,
-				'required_zencoins'        => isset( $context['required_zencoins'] ) ? self::normalize_zencoin_amount( $context['required_zencoins'] ) : 0.0,
-				'available_zencoins'       => isset( $context['available_zencoins'] ) ? self::normalize_zencoin_amount( $context['available_zencoins'] ) : 0.0,
-				'missing_zencoins'         => isset( $context['missing_zencoins'] ) ? self::normalize_zencoin_amount( $context['missing_zencoins'] ) : 0.0,
-				'wallet_is_frozen'         => ! empty( $context['wallet_is_frozen'] ),
-				'blocking_reason'          => isset( $context['blocking_reason'] ) ? sanitize_key( $context['blocking_reason'] ) : '',
-				'booking_items'            => ! empty( $context['booking_items'] ) ? array_values( $context['booking_items'] ) : array(),
-				'recovery_credit_products' => ! empty( $context['recovery_credit_products'] ) ? array_values( $context['recovery_credit_products'] ) : array(),
-				'captured_at_gmt'          => gmdate( 'Y-m-d H:i:s' ),
-			);
-
-			$order->update_meta_data( self::META_RECOVERY_INTENT, $intent );
-			$order->add_order_note(
-				sprintf(
-					/* translators: %s: missing zencoin amount */
-					__( 'Mixed recovery checkout intent captured. Missing ZC at checkout: %s.', 'coin-booking-bridge' ),
-					wc_format_decimal( $intent['missing_zencoins'] )
-				)
-			);
+			$order->save();
 		}
 
 		/**
