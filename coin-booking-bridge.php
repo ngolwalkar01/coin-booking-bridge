@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Coin Booking Bridge
  * Description: MVP bridge for WooCommerce Memberships, Subscriptions, Bookings, and Tera Wallet coin-based bookings.
- * Version: 0.2.9
+ * Version: 0.2.10
  * Author: Custom
  * Text Domain: coin-booking-bridge
  *
@@ -14,7 +14,7 @@ defined( 'ABSPATH' ) || exit;
 if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 	final class CBB_Coin_Booking_Bridge {
 
-		const VERSION           = '0.2.9';
+		const VERSION           = '0.2.10';
 		const DB_VERSION        = '2026050801';
 		const OPTION_DB_VERSION = 'cbb_db_version';
 		const OPTION_SETTINGS   = 'cbb_zencoin_settings';
@@ -2436,6 +2436,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			}
 
 			if ( self::is_wallet_frozen_for_user( $user_id ) ) {
+				self::pause_mixed_recovery_booking_fulfillment( $order );
 				self::set_mixed_recovery_status(
 					$order,
 					'blocked_wallet_frozen',
@@ -2450,6 +2451,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			);
 
 			if ( $available + 0.000001 < $coins ) {
+				self::pause_mixed_recovery_booking_fulfillment( $order );
 				self::set_mixed_recovery_status(
 					$order,
 					'blocked_insufficient_after_grant',
@@ -2503,6 +2505,43 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			}
 
 			$order->save();
+		}
+
+		/**
+		 * Revert booking fulfillment for mixed-recovery failures.
+		 *
+		 * The payment may already be successful, but the booking should not stay
+		 * in a paid/fulfilled state until the Zencoin debit actually succeeds.
+		 *
+		 * @param WC_Order $order Order object.
+		 * @return void
+		 */
+		private static function pause_mixed_recovery_booking_fulfillment( $order ) {
+			if ( ! $order instanceof WC_Order ) {
+				return;
+			}
+
+			if ( function_exists( 'get_wc_booking' ) && class_exists( 'WC_Booking_Data_Store' ) ) {
+				$booking_ids = WC_Booking_Data_Store::get_booking_ids_from_order_id( $order->get_id() );
+
+				foreach ( $booking_ids as $booking_id ) {
+					$booking = get_wc_booking( $booking_id );
+
+					if ( ! $booking || $booking->has_status( array( 'unpaid', 'cancelled', 'was-in-cart' ) ) ) {
+						continue;
+					}
+
+					$booking->set_status( 'unpaid' );
+					$booking->save();
+				}
+			}
+
+			if ( $order->has_status( array( 'processing', 'completed' ) ) ) {
+				$order->update_status(
+					'on-hold',
+					__( 'Mixed recovery booking fulfillment paused until Zencoin finalization succeeds.', 'coin-booking-bridge' )
+				);
+			}
 		}
 
 		/**
@@ -2897,7 +2936,10 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				'has_recovery_products'        => false,
 				'required_zencoins'            => 0.0,
 				'available_zencoins'           => $user_id > 0 ? self::get_available_coin_balance( $user_id ) : 0.0,
+				'recovery_zencoins'            => 0.0,
+				'projected_available_zencoins' => 0.0,
 				'missing_zencoins'             => 0.0,
+				'projected_missing_zencoins'   => 0.0,
 				'booking_items'                => array(),
 				'credit_products'              => array(),
 				'recovery_credit_products'     => array(),
@@ -2928,6 +2970,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 					if ( ! empty( $credit_item['is_recovery_eligible'] ) ) {
 						$context['has_recovery_products']    = true;
 						$context['recovery_credit_products'][] = $credit_item;
+						$context['recovery_zencoins']        += isset( $credit_item['granted_zencoins'] ) ? (float) $credit_item['granted_zencoins'] : 0.0;
 					} else {
 						$context['non_recovery_credit_products'][] = $credit_item;
 					}
@@ -2935,7 +2978,10 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			}
 
 			$context['required_zencoins'] = self::normalize_zencoin_amount( $context['required_zencoins'] );
+			$context['recovery_zencoins'] = self::normalize_zencoin_amount( $context['recovery_zencoins'] );
+			$context['projected_available_zencoins'] = self::normalize_zencoin_amount( $context['available_zencoins'] + $context['recovery_zencoins'] );
 			$context['missing_zencoins']  = self::normalize_zencoin_amount( max( 0, $context['required_zencoins'] - $context['available_zencoins'] ) );
+			$context['projected_missing_zencoins'] = self::normalize_zencoin_amount( max( 0, $context['required_zencoins'] - $context['projected_available_zencoins'] ) );
 			$context['mode']              = self::classify_cart_mode( $user_id, $context );
 			$context['blocking_reason']   = self::get_checkout_context_blocking_reason( $context );
 
@@ -2963,7 +3009,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 					return 'zencoin_booking';
 				}
 
-				if ( ! empty( $context['has_recovery_products'] ) ) {
+				if ( ! empty( $context['has_recovery_products'] ) && (float) $context['projected_missing_zencoins'] <= 0 ) {
 					return 'mixed_recovery';
 				}
 
@@ -3202,7 +3248,11 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				return 'wallet_frozen';
 			}
 
-			if ( ! empty( $context['has_booking_items'] ) && (float) $context['missing_zencoins'] > 0 && empty( $context['has_recovery_products'] ) ) {
+			if ( ! empty( $context['has_booking_items'] ) && (float) $context['projected_missing_zencoins'] > 0 ) {
+				if ( ! empty( $context['has_recovery_products'] ) ) {
+					return 'insufficient_recovery_zencoins';
+				}
+
 				return 'insufficient_zencoins';
 			}
 
