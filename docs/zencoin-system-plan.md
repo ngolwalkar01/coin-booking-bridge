@@ -1093,6 +1093,7 @@ Not included yet:
 Status: in progress.
 
 Implemented first slice in plugin version `0.2.5`.
+Implemented second slice in plugin version `0.2.9`.
 
 Included so far:
 
@@ -1107,10 +1108,14 @@ Included so far:
   - wallet frozen state
   - captured timestamp
 - Mixed-recovery orders add an order note recording the captured shortage snapshot.
+- Early legacy booking debit attempts are now deferred for mixed-recovery orders until enough credited ZC exists.
+- After a real credit grant occurs, mixed-recovery now attempts one controlled booking finalization pass from the grant source:
+  - membership subscription grant
+  - one-time package/drop-in grant
+- If payment succeeds but the credited balance is still insufficient, purchased ZC remain in the wallet and the order gets a single admin note explaining that booking was not finalized automatically.
 
 Still planned:
 
-- For mixed carts, ensure purchased Zencoins are granted before booking debit is finalized.
 - Re-check booking availability and wallet freeze rules after payment and before final booking completion.
 - If payment succeeds but booking completion fails, leave purchased ZC in wallet and show recovery guidance.
 

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Coin Booking Bridge
  * Description: MVP bridge for WooCommerce Memberships, Subscriptions, Bookings, and Tera Wallet coin-based bookings.
- * Version: 0.2.8
+ * Version: 0.2.9
  * Author: Custom
  * Text Domain: coin-booking-bridge
  *
@@ -14,7 +14,7 @@ defined( 'ABSPATH' ) || exit;
 if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 	final class CBB_Coin_Booking_Bridge {
 
-		const VERSION           = '0.2.8';
+		const VERSION           = '0.2.9';
 		const DB_VERSION        = '2026050801';
 		const OPTION_DB_VERSION = 'cbb_db_version';
 		const OPTION_SETTINGS   = 'cbb_zencoin_settings';
@@ -47,6 +47,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		const META_LATE_CANCEL_TOTAL = '_cbb_late_cancel_no_refund_total';
 		const META_CHECKOUT_MODE    = '_cbb_checkout_mode';
 		const META_RECOVERY_INTENT  = '_cbb_mixed_recovery_intent';
+		const META_RECOVERY_STATUS  = '_cbb_mixed_recovery_status';
 
 		/**
 		 * Boot plugin hooks.
@@ -1427,6 +1428,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				)
 			);
 			$order->save();
+			self::attempt_mixed_recovery_booking_finalization( $order, 'product_grant' );
 		}
 
 		/**
@@ -1903,6 +1905,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 					)
 				);
 				$order->save();
+				self::attempt_mixed_recovery_booking_finalization( $order, 'membership_grant' );
 
 				$subscription->add_order_note(
 					sprintf(
@@ -2409,6 +2412,97 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			);
 
 			return $available + 0.000001 < $coins;
+		}
+
+		/**
+		 * Attempt mixed-recovery booking finalization after credits are granted.
+		 *
+		 * @param int|WC_Order $order_id Order ID or object.
+		 * @param string       $source   Trigger source for diagnostics.
+		 * @return void
+		 */
+		private static function attempt_mixed_recovery_booking_finalization( $order_id, $source = '' ) {
+			$order = $order_id instanceof WC_Order ? $order_id : wc_get_order( $order_id );
+
+			if ( ! $order || 'mixed_recovery' !== $order->get_meta( self::META_CHECKOUT_MODE, true ) || $order->get_meta( self::META_DEBIT_TXN, true ) ) {
+				return;
+			}
+
+			$user_id = (int) $order->get_customer_id();
+			$coins   = self::get_order_coin_total( $order );
+
+			if ( $user_id <= 0 || $coins <= 0 ) {
+				return;
+			}
+
+			if ( self::is_wallet_frozen_for_user( $user_id ) ) {
+				self::set_mixed_recovery_status(
+					$order,
+					'blocked_wallet_frozen',
+					__( 'Mixed recovery payment succeeded, but booking finalization is paused because the customer wallet is frozen by an on-hold membership.', 'coin-booking-bridge' )
+				);
+				return;
+			}
+
+			$available = max(
+				self::get_wallet_balance( $user_id ),
+				self::get_zencoin_bucket_balance( $user_id )
+			);
+
+			if ( $available + 0.000001 < $coins ) {
+				self::set_mixed_recovery_status(
+					$order,
+					'blocked_insufficient_after_grant',
+					sprintf(
+						/* translators: 1: required zencoins, 2: available zencoins, 3: source */
+						__( 'Mixed recovery could not finalize booking automatically after %3$s. Purchased credits remain in the wallet. Required ZC: %1$s. Available ZC: %2$s.', 'coin-booking-bridge' ),
+						wc_format_decimal( $coins ),
+						wc_format_decimal( $available ),
+						$source ? $source : __( 'credit grant', 'coin-booking-bridge' )
+					)
+				);
+				return;
+			}
+
+			if ( $order->get_meta( self::META_RECOVERY_STATUS, true ) ) {
+				$order->delete_meta_data( self::META_RECOVERY_STATUS );
+				$order->save();
+			}
+
+			self::debit_order_booking_coins( $order );
+
+			if ( $order->get_meta( self::META_DEBIT_TXN, true ) ) {
+				$order->update_meta_data( self::META_RECOVERY_STATUS, 'completed' );
+				$order->save();
+			}
+		}
+
+		/**
+		 * Update mixed-recovery status once without repeating the same note.
+		 *
+		 * @param WC_Order $order  Order object.
+		 * @param string   $status Status key.
+		 * @param string   $note   Optional order note.
+		 * @return void
+		 */
+		private static function set_mixed_recovery_status( $order, $status, $note = '' ) {
+			if ( ! $order instanceof WC_Order ) {
+				return;
+			}
+
+			$current = (string) $order->get_meta( self::META_RECOVERY_STATUS, true );
+
+			if ( $current === $status ) {
+				return;
+			}
+
+			$order->update_meta_data( self::META_RECOVERY_STATUS, $status );
+
+			if ( '' !== $note ) {
+				$order->add_order_note( $note );
+			}
+
+			$order->save();
 		}
 
 		/**
