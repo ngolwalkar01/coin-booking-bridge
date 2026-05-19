@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Coin Booking Bridge
  * Description: MVP bridge for WooCommerce Memberships, Subscriptions, Bookings, and Tera Wallet coin-based bookings.
- * Version: 0.2.7
+ * Version: 0.2.8
  * Author: Custom
  * Text Domain: coin-booking-bridge
  *
@@ -14,7 +14,7 @@ defined( 'ABSPATH' ) || exit;
 if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 	final class CBB_Coin_Booking_Bridge {
 
-		const VERSION           = '0.2.7';
+		const VERSION           = '0.2.8';
 		const DB_VERSION        = '2026050801';
 		const OPTION_DB_VERSION = 'cbb_db_version';
 		const OPTION_SETTINGS   = 'cbb_zencoin_settings';
@@ -2323,6 +2323,10 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				return;
 			}
 
+			if ( self::should_delay_mixed_recovery_debit( $order, $user_id, $coins ) ) {
+				return;
+			}
+
 			if ( self::is_wallet_frozen_for_user( $user_id ) ) {
 				$order->update_status( 'on-hold', __( 'Zencoin debit blocked because the customer has an on-hold membership subscription.', 'coin-booking-bridge' ) );
 				return;
@@ -2381,6 +2385,30 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				)
 			);
 			$order->save();
+		}
+
+		/**
+		 * Delay mixed-recovery booking debit until the purchased credits exist.
+		 *
+		 * This avoids noisy failure notes from the legacy debit hooks while we
+		 * are still building the dedicated mixed-recovery orchestration path.
+		 *
+		 * @param WC_Order $order   Order object.
+		 * @param int      $user_id Customer ID.
+		 * @param float    $coins   Required booking coins.
+		 * @return bool
+		 */
+		private static function should_delay_mixed_recovery_debit( $order, $user_id, $coins ) {
+			if ( ! $order || 'mixed_recovery' !== $order->get_meta( self::META_CHECKOUT_MODE, true ) ) {
+				return false;
+			}
+
+			$available = max(
+				self::get_wallet_balance( $user_id ),
+				self::get_zencoin_bucket_balance( $user_id )
+			);
+
+			return $available + 0.000001 < $coins;
 		}
 
 		/**
