@@ -63,6 +63,12 @@ Customers buy recurring memberships. Successful subscription payments credit coi
    - Tracks `_cbb_coins_refunded_total` on the order so later order-level refunds do not double-refund coins.
    - Individual booking cancellations refund the matching order item's coin cost when possible.
 
+9. Global Zencoin display
+   - The frontend loads shared `.zen-coin-global` coin styling from this plugin.
+   - Admins can edit the global Zencoin tooltip in WooCommerce > Zencoin Settings.
+   - Other plugins can render the shared badge with `cbb_render_zencoin_coin( 5 )`, `[zencoin_coin value="5"]`, or by outputting an element with `data-cbb-zencoin-value="5"`.
+   - The frontend enhancer also normalizes known Zencoin badge classes used by existing Zenctuary blocks.
+
 ## Not In MVP
 
 - Coin expiry by batch.

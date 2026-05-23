@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Coin Booking Bridge
  * Description: MVP bridge for WooCommerce Memberships, Subscriptions, Bookings, and Tera Wallet coin-based bookings.
- * Version: 0.2.10
+ * Version: 0.2.11
  * Author: Custom
  * Text Domain: coin-booking-bridge
  *
@@ -14,7 +14,7 @@ defined( 'ABSPATH' ) || exit;
 if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 	final class CBB_Coin_Booking_Bridge {
 
-		const VERSION           = '0.2.10';
+		const VERSION           = '0.2.11';
 		const DB_VERSION        = '2026050801';
 		const OPTION_DB_VERSION = 'cbb_db_version';
 		const OPTION_SETTINGS   = 'cbb_zencoin_settings';
@@ -78,6 +78,9 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			if ( is_admin() ) {
 				self::maybe_upgrade_schema();
 			}
+
+			add_action( 'wp_enqueue_scripts', array( __CLASS__, 'enqueue_global_coin_assets' ) );
+			add_shortcode( 'zencoin_coin', array( __CLASS__, 'render_global_coin_shortcode' ) );
 
 			if ( is_admin() ) {
 				add_action( 'admin_notices', array( __CLASS__, 'maybe_dependency_notice' ) );
@@ -301,6 +304,8 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				'on_time_cancel_cutoff_hours'          => '12',
 				'wallet_freeze_on_subscription_on_hold' => 'yes',
 				'tera_wallet_mirror_enabled'           => 'yes',
+				'zencoin_global_coin_enabled'          => 'yes',
+				'zencoin_tooltip'                      => __( 'Zencoins are credits used to book eligible Zenctuary experiences.', 'coin-booking-bridge' ),
 			);
 		}
 
@@ -358,6 +363,8 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			$clean['auto_calculate_booking_cost']           = ! empty( $settings['auto_calculate_booking_cost'] ) ? 'yes' : 'no';
 			$clean['wallet_freeze_on_subscription_on_hold'] = ! empty( $settings['wallet_freeze_on_subscription_on_hold'] ) ? 'yes' : 'no';
 			$clean['tera_wallet_mirror_enabled']            = ! empty( $settings['tera_wallet_mirror_enabled'] ) ? 'yes' : 'no';
+			$clean['zencoin_global_coin_enabled']           = ! empty( $settings['zencoin_global_coin_enabled'] ) ? 'yes' : 'no';
+			$clean['zencoin_tooltip']                       = isset( $settings['zencoin_tooltip'] ) ? sanitize_textarea_field( wp_unslash( $settings['zencoin_tooltip'] ) ) : $defaults['zencoin_tooltip'];
 
 			return wp_parse_args( $clean, $defaults );
 		}
@@ -421,6 +428,13 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 						<?php self::render_number_setting_row( 'on_time_cancel_cutoff_hours', __( 'On-time cancellation cutoff (hours)', 'coin-booking-bridge' ), $settings, '1' ); ?>
 						<?php self::render_checkbox_setting_row( 'wallet_freeze_on_subscription_on_hold', __( 'Freeze wallet when membership subscription is on-hold', 'coin-booking-bridge' ), $settings ); ?>
 						<?php self::render_checkbox_setting_row( 'tera_wallet_mirror_enabled', __( 'Mirror CBB balance changes to Tera Wallet', 'coin-booking-bridge' ), $settings ); ?>
+					</table>
+
+					<h2><?php esc_html_e( 'Global Zencoin Display', 'coin-booking-bridge' ); ?></h2>
+					<p><?php esc_html_e( 'Shared coin badge markup, styling, and tooltip used across theme blocks and custom plugins.', 'coin-booking-bridge' ); ?></p>
+					<table class="form-table" role="presentation">
+						<?php self::render_checkbox_setting_row( 'zencoin_global_coin_enabled', __( 'Enable global Zencoin coin styling and replacement', 'coin-booking-bridge' ), $settings ); ?>
+						<?php self::render_textarea_setting_row( 'zencoin_tooltip', __( 'Zencoin tooltip', 'coin-booking-bridge' ), $settings ); ?>
 					</table>
 
 					<?php submit_button(); ?>
@@ -1038,6 +1052,150 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				</td>
 			</tr>
 			<?php
+		}
+
+		/**
+		 * Render textarea setting row.
+		 *
+		 * @param string $key      Setting key.
+		 * @param string $label    Field label.
+		 * @param array  $settings Settings.
+		 */
+		private static function render_textarea_setting_row( $key, $label, $settings ) {
+			?>
+			<tr>
+				<th scope="row"><label for="cbb_<?php echo esc_attr( $key ); ?>"><?php echo esc_html( $label ); ?></label></th>
+				<td>
+					<textarea
+						id="cbb_<?php echo esc_attr( $key ); ?>"
+						name="<?php echo esc_attr( self::OPTION_SETTINGS ); ?>[<?php echo esc_attr( $key ); ?>]"
+						rows="3"
+						class="large-text"
+					><?php echo esc_textarea( $settings[ $key ] ); ?></textarea>
+					<p class="description"><?php esc_html_e( 'Shown on hover/focus for every global Zencoin badge.', 'coin-booking-bridge' ); ?></p>
+				</td>
+			</tr>
+			<?php
+		}
+
+		/**
+		 * Enqueue global Zencoin frontend assets.
+		 */
+		public static function enqueue_global_coin_assets() {
+			$settings = self::get_settings();
+
+			if ( 'yes' !== $settings['zencoin_global_coin_enabled'] ) {
+				return;
+			}
+
+			$asset_url = plugin_dir_url( __FILE__ ) . 'assets/';
+
+			wp_enqueue_style(
+				'cbb-zencoin-global',
+				$asset_url . 'css/cbb-zencoin-global.css',
+				array(),
+				self::VERSION
+			);
+
+			wp_enqueue_script(
+				'cbb-zencoin-global',
+				$asset_url . 'js/cbb-zencoin-global.js',
+				array(),
+				self::VERSION,
+				true
+			);
+
+			wp_localize_script(
+				'cbb-zencoin-global',
+				'cbbZencoinGlobal',
+				array(
+					'tooltip'  => $settings['zencoin_tooltip'],
+					'selectors' => array(
+						'[data-cbb-zencoin-value]',
+						'[data-zencoin-value]',
+						'.zpb-membership-card__coin',
+						'.zpb-package-card__coin',
+						'.zpb-dropin-card__coin',
+						'.zen-what-zencoins-coin',
+						'.zen-zencoins-badge',
+						'.pfc__zencoin-badge',
+						'.zen-coin-icon',
+					),
+				)
+			);
+		}
+
+		/**
+		 * Render a reusable global Zencoin coin badge.
+		 *
+		 * @param mixed $value Coin value.
+		 * @param array $args  Optional render args.
+		 * @return string
+		 */
+		public static function render_global_zencoin_coin( $value = '', $args = array() ) {
+			$settings = self::get_settings();
+			$args     = wp_parse_args(
+				is_array( $args ) ? $args : array(),
+				array(
+					'class'   => '',
+					'tooltip' => $settings['zencoin_tooltip'],
+				)
+			);
+			$value    = trim( wp_strip_all_tags( (string) $value ) );
+			$extra_classes = array_filter( array_map( 'sanitize_html_class', preg_split( '/\s+/', (string) $args['class'] ) ) );
+			$classes  = trim( 'zen-coin-global ' . implode( ' ', $extra_classes ) );
+			$tooltip  = trim( wp_strip_all_tags( (string) $args['tooltip'] ) );
+			$label    = '' !== $tooltip
+				? sprintf( __( '%1$s Zencoins. %2$s', 'coin-booking-bridge' ), $value, $tooltip )
+				: sprintf( __( '%s Zencoins', 'coin-booking-bridge' ), $value );
+
+			ob_start();
+			?>
+			<span
+				class="<?php echo esc_attr( $classes ); ?>"
+				data-cbb-zencoin="1"
+				data-zencoin-value="<?php echo esc_attr( $value ); ?>"
+				<?php if ( '' !== $tooltip ) : ?>
+					data-zencoin-tooltip="<?php echo esc_attr( $tooltip ); ?>"
+					title="<?php echo esc_attr( $tooltip ); ?>"
+				<?php endif; ?>
+				aria-label="<?php echo esc_attr( $label ); ?>"
+				tabindex="0"
+			>
+				<span class="zen-coin-global__ring"></span>
+				<span class="zen-coin-global__value"><?php echo esc_html( $value ); ?></span>
+			</span>
+			<?php
+
+			return trim( ob_get_clean() );
+		}
+
+		/**
+		 * Render shortcode: [zencoin_coin value="5"].
+		 *
+		 * @param array $atts Shortcode attributes.
+		 * @return string
+		 */
+		public static function render_global_coin_shortcode( $atts ) {
+			$atts = shortcode_atts(
+				array(
+					'value'   => '',
+					'class'   => '',
+					'tooltip' => null,
+				),
+				(array) $atts,
+				'zencoin_coin'
+			);
+
+			$args = array(
+				'class' => $atts['class'],
+			);
+
+			if ( null !== $atts['tooltip'] ) {
+				$args['tooltip'] = $atts['tooltip'];
+			}
+
+			return self::render_global_zencoin_coin( $atts['value'], $args );
 		}
 
 		/**
@@ -3425,6 +3583,19 @@ if ( ! function_exists( 'cbb_get_checkout_context' ) ) {
 	 */
 	function cbb_get_checkout_context( $user_id = 0, $args = array() ) {
 		return class_exists( 'CBB_Coin_Booking_Bridge' ) ? CBB_Coin_Booking_Bridge::get_checkout_context( $user_id, $args ) : array();
+	}
+}
+
+if ( ! function_exists( 'cbb_render_zencoin_coin' ) ) {
+	/**
+	 * Public helper for rendering the shared Zencoin coin badge.
+	 *
+	 * @param mixed $value Coin value.
+	 * @param array $args  Optional render args.
+	 * @return string
+	 */
+	function cbb_render_zencoin_coin( $value = '', $args = array() ) {
+		return class_exists( 'CBB_Coin_Booking_Bridge' ) ? CBB_Coin_Booking_Bridge::render_global_zencoin_coin( $value, $args ) : '';
 	}
 }
 
