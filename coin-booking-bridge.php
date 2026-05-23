@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Coin Booking Bridge
  * Description: MVP bridge for WooCommerce Memberships, Subscriptions, Bookings, and Tera Wallet coin-based bookings.
- * Version: 0.2.13
+ * Version: 0.2.16
  * Author: Custom
  * Text Domain: coin-booking-bridge
  *
@@ -14,7 +14,7 @@ defined( 'ABSPATH' ) || exit;
 if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 	final class CBB_Coin_Booking_Bridge {
 
-		const VERSION           = '0.2.13';
+		const VERSION           = '0.2.16';
 		const DB_VERSION        = '2026050801';
 		const OPTION_DB_VERSION = 'cbb_db_version';
 		const OPTION_SETTINGS   = 'cbb_zencoin_settings';
@@ -1120,6 +1120,8 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 						'.zen-zencoins-badge',
 						'.pfc__zencoin-badge',
 						'.zen-coin-icon',
+						'.zbp-coins',
+						'.zbp-join-zencoins',
 					),
 					'rangeSelectors' => array(
 						'[data-cbb-zencoin-range]',

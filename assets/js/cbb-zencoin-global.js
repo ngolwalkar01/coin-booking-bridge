@@ -70,6 +70,63 @@
 		return coin;
 	}
 
+	function getDirectText( element ) {
+		var text = '';
+
+		element.childNodes.forEach( function ( node ) {
+			if ( node.nodeType === 3 ) {
+				text += node.textContent;
+			}
+		} );
+
+		return text.replace( /\s+/g, ' ' ).trim();
+	}
+
+	function getWrapperCoinValue( element ) {
+		var valueElement = element.querySelector( ':scope > [data-cbb-zencoin-value], :scope > [data-zencoin-value], :scope > .zen-coin-global, :scope > span, :scope > strong, :scope > b' );
+
+		return valueElement ? getCoinValue( valueElement ) : getCoinValue( element ).replace( getDirectText( element ), '' ).trim();
+	}
+
+	function replaceCoinWrapper( element ) {
+		var label;
+		var value;
+		var labelElement;
+
+		if ( element.dataset && element.dataset.cbbZencoinEnhanced ) {
+			return;
+		}
+
+		label = getDirectText( element );
+		value = getWrapperCoinValue( element );
+
+		if ( ! value ) {
+			return;
+		}
+
+		element.textContent = '';
+
+		if ( label ) {
+			labelElement = document.createElement( 'span' );
+			labelElement.className = 'zen-coin-global-label';
+			labelElement.textContent = label;
+			element.appendChild( labelElement );
+		}
+
+		element.appendChild( createCoin( value ) );
+
+		if ( element.dataset ) {
+			element.dataset.cbbZencoinEnhanced = '1';
+		}
+	}
+
+	function isLabelValueCoinWrapper( element ) {
+		return element.classList && (
+			element.classList.contains( 'zbp-coins' ) ||
+			element.classList.contains( 'zbp-join-zencoins' )
+		);
+	}
+
 	function enhanceExistingCoin( coin ) {
 		var value = getCoinValue( coin );
 		var hasStructure = coin.querySelector( ':scope > .zen-coin-global__ring' ) && coin.querySelector( ':scope > .zen-coin-global__value' );
@@ -94,6 +151,11 @@
 		var value;
 
 		if ( element.closest( '.zen-coin-global' ) || ( element.dataset && element.dataset.cbbZencoinEnhanced ) ) {
+			return;
+		}
+
+		if ( isLabelValueCoinWrapper( element ) ) {
+			replaceCoinWrapper( element );
 			return;
 		}
 

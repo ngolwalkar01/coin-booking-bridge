@@ -35,6 +35,17 @@
 	z-index: 1;
 }
 
+.zbp-coins[data-cbb-zencoin-enhanced="1"],
+.zbp-join-zencoins[data-cbb-zencoin-enhanced="1"] {
+	align-items: center;
+	display: inline-flex;
+	gap: 10px;
+}
+
+.zen-coin-global-label {
+	display: inline-block;
+}
+
 [data-cbb-zencoin-range="1"] {
 	align-items: center;
 	display: inline-flex;
