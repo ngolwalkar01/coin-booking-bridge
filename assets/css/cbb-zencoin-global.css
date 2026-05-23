@@ -70,15 +70,39 @@
 	width: var(--zen-coin-size) !important;
 }
 
+.zbp-coins[data-cbb-zencoin-enhanced="1"] > .zen-coin-global span,
+.zbp-join-zencoins[data-cbb-zencoin-enhanced="1"] > .zen-coin-global span {
+	margin-left: 0 !important;
+	min-width: 0 !important;
+}
+
 .zbp-coins[data-cbb-zencoin-enhanced="1"] > .zen-coin-global > .zen-coin-global__ring,
 .zbp-join-zencoins[data-cbb-zencoin-enhanced="1"] > .zen-coin-global > .zen-coin-global__ring {
 	background: transparent !important;
 	border: 2px solid var(--zen-coin-ink) !important;
 	border-radius: 50% !important;
+	color: inherit !important;
+	display: block !important;
 	height: auto !important;
 	inset: 4px !important;
 	padding: 0 !important;
+	position: absolute !important;
 	width: auto !important;
+}
+
+.zbp-coins[data-cbb-zencoin-enhanced="1"] > .zen-coin-global > .zen-coin-global__value,
+.zbp-join-zencoins[data-cbb-zencoin-enhanced="1"] > .zen-coin-global > .zen-coin-global__value {
+	background: transparent !important;
+	border: 0 !important;
+	border-radius: 0 !important;
+	color: var(--zen-coin-ink) !important;
+	display: inline !important;
+	height: auto !important;
+	line-height: 1 !important;
+	padding: 0 !important;
+	position: relative !important;
+	width: auto !important;
+	z-index: 1 !important;
 }
 
 [data-cbb-zencoin-range="1"] {
