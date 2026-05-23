@@ -71,8 +71,9 @@
 
 	function enhanceExistingCoin( coin ) {
 		var value = getCoinValue( coin );
+		var hasStructure = coin.querySelector( ':scope > .zen-coin-global__ring' ) && coin.querySelector( ':scope > .zen-coin-global__value' );
 
-		if ( coin.dataset && coin.dataset.cbbZencoinEnhanced ) {
+		if ( coin.dataset && coin.dataset.cbbZencoinEnhanced && hasStructure ) {
 			return;
 		}
 
