@@ -38,21 +38,32 @@
 		}
 	}
 
+	function createRing() {
+		var ring = document.createElement( 'span' );
+
+		ring.className = 'zen-coin-global__ring';
+
+		return ring;
+	}
+
+	function createValue( value ) {
+		var text = document.createElement( 'span' );
+
+		text.className = 'zen-coin-global__value';
+		text.textContent = value;
+
+		return text;
+	}
+
 	function createCoin( value ) {
 		var coin = document.createElement( 'span' );
-		var ring = document.createElement( 'span' );
-		var text = document.createElement( 'span' );
 
 		coin.className = 'zen-coin-global zen-coin-global--replaced';
 		coin.setAttribute( 'data-cbb-zencoin', '1' );
 		coin.setAttribute( 'data-zencoin-value', value );
 
-		ring.className = 'zen-coin-global__ring';
-		text.className = 'zen-coin-global__value';
-		text.textContent = value;
-
-		coin.appendChild( ring );
-		coin.appendChild( text );
+		coin.appendChild( createRing() );
+		coin.appendChild( createValue( value ) );
 		applyTooltip( coin, value );
 
 		return coin;
@@ -65,6 +76,9 @@
 			return;
 		}
 
+		coin.textContent = '';
+		coin.appendChild( createRing() );
+		coin.appendChild( createValue( value ) );
 		applyTooltip( coin, value );
 
 		if ( coin.dataset ) {
