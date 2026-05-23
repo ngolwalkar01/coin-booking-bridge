@@ -3,6 +3,7 @@
 
 	var config = window.cbbZencoinGlobal || {};
 	var selectors = Array.isArray( config.selectors ) ? config.selectors : [];
+	var rangeSelectors = Array.isArray( config.rangeSelectors ) ? config.rangeSelectors : [];
 	var tooltip = 'string' === typeof config.tooltip ? config.tooltip.trim() : '';
 	var observer = null;
 
@@ -105,9 +106,25 @@
 		element.replaceWith( createCoin( value ) );
 	}
 
+	function markCoinRange( element ) {
+		if ( ! element.dataset ) {
+			return;
+		}
+
+		element.dataset.cbbZencoinRange = '1';
+	}
+
 	function scan( root ) {
 		var scope = root && root.querySelectorAll ? root : document;
 		var rootElement = scope.nodeType === 1 ? scope : null;
+
+		rangeSelectors.forEach( function ( selector ) {
+			if ( rootElement && rootElement.matches( selector ) ) {
+				markCoinRange( rootElement );
+			}
+
+			scope.querySelectorAll( selector ).forEach( markCoinRange );
+		} );
 
 		scope.querySelectorAll( '.zen-coin-global' ).forEach( enhanceExistingCoin );
 

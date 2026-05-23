@@ -35,6 +35,37 @@
 	z-index: 1;
 }
 
+[data-cbb-zencoin-range="1"] {
+	align-items: center;
+	display: inline-flex;
+	flex-wrap: nowrap;
+	justify-content: flex-start;
+}
+
+[data-cbb-zencoin-range="1"] > .zen-coin-global + .zen-coin-global {
+	margin-left: calc(var(--zen-coin-size, 47px) * -0.34);
+}
+
+[data-cbb-zencoin-range="1"] > .zen-coin-global {
+	position: relative;
+}
+
+[data-cbb-zencoin-range="1"] > .zen-coin-global:nth-child(1) {
+	z-index: 1;
+}
+
+[data-cbb-zencoin-range="1"] > .zen-coin-global:nth-child(2) {
+	z-index: 2;
+}
+
+[data-cbb-zencoin-range="1"] > .zen-coin-global:nth-child(3) {
+	z-index: 3;
+}
+
+[data-cbb-zencoin-range="1"] > .zen-coin-global:nth-child(4) {
+	z-index: 4;
+}
+
 .zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""]) {
 	cursor: help;
 }
