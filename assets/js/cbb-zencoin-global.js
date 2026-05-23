@@ -88,32 +88,88 @@
 		return valueElement ? getCoinValue( valueElement ) : getCoinValue( element ).replace( getDirectText( element ), '' ).trim();
 	}
 
+	function getNumericToken( text ) {
+		var matches = String( text || '' ).match( /[-+]?\d+(?:[.,]\d+)?/g );
+
+		return matches ? matches[ matches.length - 1 ] : '';
+	}
+
+	function getWrapperParts( element ) {
+		var children = Array.from( element.children );
+		var labelParts = [];
+		var value = '';
+		var valueElement = null;
+		var directText = getDirectText( element );
+
+		if ( directText ) {
+			labelParts.push( directText );
+		}
+
+		children.forEach( function ( child ) {
+			var childValue = '';
+
+			if ( valueElement ) {
+				return;
+			}
+
+			if ( child.matches( '[data-cbb-zencoin-value], [data-zencoin-value], .zen-coin-global' ) ) {
+				valueElement = child;
+				value = getCoinValue( child );
+				return;
+			}
+
+			childValue = getNumericToken( child.textContent );
+
+			if ( childValue ) {
+				valueElement = child;
+				value = childValue;
+			}
+		} );
+
+		if ( ! value ) {
+			value = getNumericToken( element.textContent );
+		}
+
+		children.forEach( function ( child ) {
+			var childText = child.textContent.replace( /\s+/g, ' ' ).trim();
+
+			if ( child === valueElement || ! childText ) {
+				return;
+			}
+
+			labelParts.push( childText );
+		} );
+
+		return {
+			label: labelParts.join( ' ' ).replace( /\s+/g, ' ' ).trim(),
+			value: value,
+		};
+	}
+
 	function replaceCoinWrapper( element ) {
-		var label;
-		var value;
+		var parts;
 		var labelElement;
 
 		if ( element.dataset && element.dataset.cbbZencoinEnhanced ) {
 			return;
 		}
 
-		label = getDirectText( element );
-		value = getWrapperCoinValue( element );
+		parts = getWrapperParts( element );
 
-		if ( ! value ) {
+		if ( ! parts.value ) {
 			return;
 		}
 
 		element.textContent = '';
 
-		if ( label ) {
+		if ( parts.label ) {
 			labelElement = document.createElement( 'span' );
 			labelElement.className = 'zen-coin-global-label';
-			labelElement.textContent = label;
+			labelElement.textContent = parts.label;
 			element.appendChild( labelElement );
 		}
 
-		element.appendChild( createCoin( value ) );
+		element.appendChild( createCoin( parts.value ) );
 
 		if ( element.dataset ) {
 			element.dataset.cbbZencoinEnhanced = '1';
