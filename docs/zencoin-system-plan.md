@@ -1090,7 +1090,7 @@ Not included yet:
 
 #### Milestone 6.1: Mixed Recovery Booking Orchestration
 
-Status: in progress.
+Status: completed.
 
 Implemented first slice in plugin version `0.2.5`.
 Implemented second slice in plugin version `0.2.9`.
@@ -1123,18 +1123,91 @@ Included so far:
   - `payment_failed` -> payment retry popup
   - `booking_full` -> class-full schedule popup
   - `booking_failed` -> technical booking-failed popup
-- `zen-checkout-flow` version `0.1.33` can read these result states from WooCommerce result URLs, render the matching popup, and complete enough-ZC `zencoin_booking` carts without payment gateways.
-
-Still planned:
-
-- Add site-specific copy/design mapping for recovery guidance popups.
+- `zen-checkout-flow` version `0.1.35` can read these result states from WooCommerce result URLs, render the matching popup, and complete enough-ZC `zencoin_booking` carts without payment gateways.
+- Site-specific popup mapping is implemented in `zen-checkout-flow`:
+  - `completed` shows the purchase-and-booking confirmation layout.
+  - `payment_failed` shows retry/cancel guidance.
+  - `booking_full` explains that payment was not completed and routes the customer back to schedule.
+  - `booking_failed` explains the technical booking failure and routes the customer to schedule/profile.
 
 #### Milestone 6.2: Checkout UI Consumer Documentation
 
-Planned scope:
+Status: documented.
 
-- Document how `zen-checkout-flow` should consume the checkout context API.
+Purpose:
+
+- Define the contract between CBB and checkout UIs such as `zen-checkout-flow`.
 - Keep the contract generic so other checkout UIs can reuse it outside this site.
+
+Public context API:
+
+- Preferred PHP function: `cbb_get_checkout_context()`.
+- Class method: `CBB_Coin_Booking_Bridge::get_checkout_context()`.
+- The API is read-only and should be safe for rendering decisions. It must not create orders, grant ZC, debit ZC, or mutate bookings.
+
+Context modes:
+
+- `money_purchase`
+  - Cart does not need a Zencoin-only booking flow.
+  - UI should show the normal money checkout/payment gateway path.
+- `zencoin_booking`
+  - Cart booking cost is fully covered by the customer's available ZC.
+  - UI should hide payment gateways and show a wallet-only booking action.
+  - On completion, the UI should create the Woo order and let CBB debit ZC from checkout/order hooks.
+- `mixed_recovery`
+  - Cart contains booking items plus recovery-eligible credit products that should cover the missing ZC.
+  - UI should show the normal payment path for the recovery products.
+  - After payment/grant, CBB finalizes the booking debit in one controlled pass.
+- `insufficient_prompt`
+  - Cart contains a booking shortage but no recovery-eligible credit product.
+  - UI should block checkout completion and prompt the customer to add a valid package/membership/drop-in recovery product.
+  - `zen-checkout-flow` version `0.1.36` hides gateways in this state and shows Add Zencoins / Back to Schedule actions.
+
+Core context fields checkout UIs may consume:
+
+- `mode`: normalized checkout mode.
+- `has_booking_items`: whether the cart contains bookable items with CBB ZC cost.
+- `has_credit_products`: whether the cart contains any CBB credit product.
+- `has_recovery_products`: whether the cart contains credit products that can recover a booking shortage.
+- `booking_items`: normalized booking-line data for display and validation.
+- `credit_products`: normalized credit-purchase line data.
+- `recovery_credit_products`: credit products eligible to resolve a booking shortage.
+- `required_zc`: total ZC required by booking items.
+- `available_zc`: customer wallet balance currently available for booking.
+- `missing_zc`: shortage after applying available balance.
+- `wallet_frozen`: whether wallet state blocks checkout.
+- `blocking_reason`: machine-readable reason the UI can map to customer guidance.
+
+Order/result metadata checkout UIs may consume after checkout:
+
+- `_cbb_checkout_mode`: mode captured at order creation.
+- `_cbb_mixed_recovery_intent`: shortage/recovery snapshot captured at order creation.
+- `_cbb_mixed_recovery_status`: final result status for mixed recovery or wallet-only booking flows.
+- `_cbb_mixed_recovery_context`: customer-facing result context, including optional message/action data.
+- `_cbb_coins_debited_transaction_id`: present when booking ZC debit succeeded.
+
+Result statuses:
+
+- `completed`
+  - Purchase/booking completed and ZC debit succeeded.
+  - UI should show the success confirmation state.
+- `payment_failed`
+  - Money payment failed before booking debit.
+  - UI should let the customer retry payment or cancel.
+- `booking_full`
+  - Payment/recovery path reached booking finalization, but the selected booking became unavailable.
+  - UI should explain that no booking debit was made and route the customer back to schedule.
+- `booking_failed`
+  - Availability passed, but debit/finalization failed for a technical reason.
+  - UI should explain that purchased ZC remain in the wallet and route the customer to retry booking or view profile.
+
+Consumer responsibilities:
+
+- Treat CBB as the source of truth for checkout mode and ZC arithmetic.
+- Do not duplicate booking debit, grant, or availability-finalization logic in the UI layer.
+- Use CBB context to decide which checkout controls to show.
+- Use WooCommerce order-received/order-pay URLs plus CBB order metadata to render final result states.
+- Keep customer-facing copy/design in the UI plugin, while keeping machine-readable statuses in CBB.
 
 ## Open Questions
 
