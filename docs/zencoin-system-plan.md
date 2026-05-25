@@ -1161,11 +1161,12 @@ Context modes:
 - `insufficient_prompt`
   - Cart contains a booking shortage but no recovery-eligible credit product.
   - UI should block checkout completion and prompt the customer to add a valid package/membership/drop-in recovery product.
-  - `zen-checkout-flow` version `0.1.38` hides gateways in this state and follows the Figma entry flows:
+  - `zen-checkout-flow` version `0.1.39` hides gateways in this state and follows the Figma entry flows:
     - 0 ZC customers see an in-popup plan chooser.
     - customers missing a smaller amount see a compact buy-missing-ZC prompt.
     - choosing a recovery product adds it to cart and refreshes into mixed-recovery payment.
     - the popup back arrow removes the selected recovery product and returns to the previous recovery step.
+  - `coin-booking-bridge` version `0.2.21` lets mixed-recovery carts proceed to payment when projected ZC after the recovery product covers the booking cost.
 
 Core context fields checkout UIs may consume:
 
