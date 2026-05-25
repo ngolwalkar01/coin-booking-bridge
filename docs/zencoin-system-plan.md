@@ -1119,10 +1119,11 @@ Included so far:
 - If the selected booking is no longer available, the order is marked `booking_full`, booking fulfillment is paused, purchased ZC remain in the wallet, and no booking debit is made.
 - If availability passes but ZC debit/finalization fails, the order is marked `booking_failed`, booking fulfillment is paused, purchased ZC remain in the wallet, and the customer can retry booking.
 - Mixed-recovery status context is stored in `_cbb_mixed_recovery_context` so checkout/account UIs can choose the correct popup state:
+  - `completed` -> purchase-and-booking success popup
   - `payment_failed` -> payment retry popup
   - `booking_full` -> class-full schedule popup
   - `booking_failed` -> technical booking-failed popup
-- `zen-checkout-flow` version `0.1.29` can read these result states from WooCommerce result URLs and render the matching popup.
+- `zen-checkout-flow` version `0.1.30` can read these result states from WooCommerce result URLs and render the matching popup.
 
 Still planned:
 
