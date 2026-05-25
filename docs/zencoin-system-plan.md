@@ -1122,10 +1122,10 @@ Included so far:
   - `payment_failed` -> payment retry popup
   - `booking_full` -> class-full schedule popup
   - `booking_failed` -> technical booking-failed popup
+- `zen-checkout-flow` version `0.1.29` can read these result states from WooCommerce result URLs and render the matching popup.
 
 Still planned:
 
-- Wire `zen-checkout-flow` to read/display the mixed-recovery result states after payment redirects or Store API completion.
 - Add site-specific copy/design mapping for recovery guidance popups.
 
 #### Milestone 6.2: Checkout UI Consumer Documentation
