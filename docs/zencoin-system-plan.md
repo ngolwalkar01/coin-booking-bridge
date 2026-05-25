@@ -1094,6 +1094,7 @@ Status: in progress.
 
 Implemented first slice in plugin version `0.2.5`.
 Implemented second slice in plugin version `0.2.9`.
+Implemented third slice in plugin version `0.2.20`.
 
 Included so far:
 
@@ -1113,11 +1114,19 @@ Included so far:
   - membership subscription grant
   - one-time package/drop-in grant
 - If payment succeeds but the credited balance is still insufficient, purchased ZC remain in the wallet and the order gets a single admin note explaining that booking was not finalized automatically.
+- Failed mixed-recovery payments are marked as `payment_failed` and do not debit booking ZC.
+- After payment and before debit, mixed-recovery orders re-check the attached booking availability.
+- If the selected booking is no longer available, the order is marked `booking_full`, booking fulfillment is paused, purchased ZC remain in the wallet, and no booking debit is made.
+- If availability passes but ZC debit/finalization fails, the order is marked `booking_failed`, booking fulfillment is paused, purchased ZC remain in the wallet, and the customer can retry booking.
+- Mixed-recovery status context is stored in `_cbb_mixed_recovery_context` so checkout/account UIs can choose the correct popup state:
+  - `payment_failed` -> payment retry popup
+  - `booking_full` -> class-full schedule popup
+  - `booking_failed` -> technical booking-failed popup
 
 Still planned:
 
-- Re-check booking availability and wallet freeze rules after payment and before final booking completion.
-- If payment succeeds but booking completion fails, leave purchased ZC in wallet and show recovery guidance.
+- Wire `zen-checkout-flow` to read/display the mixed-recovery result states after payment redirects or Store API completion.
+- Add site-specific copy/design mapping for recovery guidance popups.
 
 #### Milestone 6.2: Checkout UI Consumer Documentation
 

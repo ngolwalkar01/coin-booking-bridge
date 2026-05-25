@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Coin Booking Bridge
  * Description: MVP bridge for WooCommerce Memberships, Subscriptions, Bookings, and Tera Wallet coin-based bookings.
- * Version: 0.2.19
+ * Version: 0.2.20
  * Author: Custom
  * Text Domain: coin-booking-bridge
  *
@@ -14,7 +14,7 @@ defined( 'ABSPATH' ) || exit;
 if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 	final class CBB_Coin_Booking_Bridge {
 
-		const VERSION           = '0.2.19';
+		const VERSION           = '0.2.20';
 		const DB_VERSION        = '2026050801';
 		const OPTION_DB_VERSION = 'cbb_db_version';
 		const OPTION_SETTINGS   = 'cbb_zencoin_settings';
@@ -48,6 +48,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		const META_CHECKOUT_MODE    = '_cbb_checkout_mode';
 		const META_RECOVERY_INTENT  = '_cbb_mixed_recovery_intent';
 		const META_RECOVERY_STATUS  = '_cbb_mixed_recovery_status';
+		const META_RECOVERY_CONTEXT = '_cbb_mixed_recovery_context';
 
 		/**
 		 * Boot plugin hooks.
@@ -121,6 +122,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			add_action( 'woocommerce_payment_complete', array( __CLASS__, 'debit_order_booking_coins' ), 30, 1 );
 			add_action( 'woocommerce_order_status_processing', array( __CLASS__, 'debit_order_booking_coins' ), 30, 1 );
 			add_action( 'woocommerce_order_status_completed', array( __CLASS__, 'debit_order_booking_coins' ), 30, 1 );
+			add_action( 'woocommerce_order_status_failed', array( __CLASS__, 'mark_mixed_recovery_payment_failed' ), 20, 1 );
 
 			add_action( 'woocommerce_order_status_cancelled', array( __CLASS__, 'refund_order_booking_coins' ), 20 );
 			add_action( 'woocommerce_order_status_refunded', array( __CLASS__, 'refund_order_booking_coins' ), 20 );
@@ -2495,6 +2497,10 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				return;
 			}
 
+			if ( self::is_mixed_recovery_debit_blocked_by_status( $order ) ) {
+				return;
+			}
+
 			if ( self::is_wallet_frozen_for_user( $user_id ) ) {
 				$order->update_status( 'on-hold', __( 'Zencoin debit blocked because the customer has an on-hold membership subscription.', 'coin-booking-bridge' ) );
 				return;
@@ -2580,6 +2586,30 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		}
 
 		/**
+		 * Check whether a mixed-recovery status should prevent later debit hooks.
+		 *
+		 * @param WC_Order $order Order object.
+		 * @return bool
+		 */
+		private static function is_mixed_recovery_debit_blocked_by_status( $order ) {
+			if ( ! $order || 'mixed_recovery' !== $order->get_meta( self::META_CHECKOUT_MODE, true ) ) {
+				return false;
+			}
+
+			return in_array(
+				(string) $order->get_meta( self::META_RECOVERY_STATUS, true ),
+				array(
+					'payment_failed',
+					'booking_full',
+					'booking_failed',
+					'blocked_wallet_frozen',
+					'blocked_insufficient_after_grant',
+				),
+				true
+			);
+		}
+
+		/**
 		 * Attempt mixed-recovery booking finalization after credits are granted.
 		 *
 		 * @param int|WC_Order $order_id Order ID or object.
@@ -2605,7 +2635,32 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				self::set_mixed_recovery_status(
 					$order,
 					'blocked_wallet_frozen',
-					__( 'Mixed recovery payment succeeded, but booking finalization is paused because the customer wallet is frozen by an on-hold membership.', 'coin-booking-bridge' )
+					__( 'Mixed recovery payment succeeded, but booking finalization is paused because the customer wallet is frozen by an on-hold membership.', 'coin-booking-bridge' ),
+					array(
+						'user_message' => __( 'Your payment was completed, but your Zencoin wallet is currently paused because a membership is on hold. Your Zencoins remain in your wallet.', 'coin-booking-bridge' ),
+						'action'       => 'profile',
+					)
+				);
+				return;
+			}
+
+			$availability = self::check_mixed_recovery_booking_availability( $order );
+
+			if ( is_wp_error( $availability ) ) {
+				self::pause_mixed_recovery_booking_fulfillment( $order );
+				self::set_mixed_recovery_status(
+					$order,
+					'booking_full',
+					sprintf(
+						/* translators: %s: availability error message */
+						__( 'Mixed recovery payment succeeded, but booking finalization was stopped because the selected booking is no longer available. Purchased credits remain in the wallet. Availability message: %s', 'coin-booking-bridge' ),
+						$availability->get_error_message()
+					),
+					array(
+						'user_message' => __( 'Your payment was completed, but this class filled up at the last moment. Your Zencoins remain in your wallet so you can schedule another class.', 'coin-booking-bridge' ),
+						'action'       => 'schedule',
+						'error_code'   => $availability->get_error_code(),
+					)
 				);
 				return;
 			}
@@ -2626,6 +2681,10 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 						wc_format_decimal( $coins ),
 						wc_format_decimal( $available ),
 						$source ? $source : __( 'credit grant', 'coin-booking-bridge' )
+					),
+					array(
+						'user_message' => __( 'Your payment was completed, but the booking could not be finalized because there are still not enough Zencoins available. Purchased Zencoins remain in your wallet.', 'coin-booking-bridge' ),
+						'action'       => 'profile',
 					)
 				);
 				return;
@@ -2639,37 +2698,259 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			self::debit_order_booking_coins( $order );
 
 			if ( $order->get_meta( self::META_DEBIT_TXN, true ) ) {
-				$order->update_meta_data( self::META_RECOVERY_STATUS, 'completed' );
+				self::set_mixed_recovery_status(
+					$order,
+					'completed',
+					'',
+					array(
+						'user_message' => __( 'Booking completed.', 'coin-booking-bridge' ),
+						'action'       => 'profile',
+					)
+				);
 				$order->save();
+				return;
 			}
+
+			self::pause_mixed_recovery_booking_fulfillment( $order );
+			self::set_mixed_recovery_status(
+				$order,
+				'booking_failed',
+				__( 'Mixed recovery payment succeeded and the selected booking was still available, but Zencoin debit/final booking completion failed. Purchased credits remain in the wallet.', 'coin-booking-bridge' ),
+				array(
+					'user_message' => __( 'A technical issue prevented booking completion. Your Zencoins were credited to your account and you can try booking again at any time.', 'coin-booking-bridge' ),
+					'action'       => 'schedule',
+				)
+			);
 		}
 
 		/**
 		 * Update mixed-recovery status once without repeating the same note.
 		 *
-		 * @param WC_Order $order  Order object.
-		 * @param string   $status Status key.
-		 * @param string   $note   Optional order note.
+		 * @param WC_Order $order   Order object.
+		 * @param string   $status  Status key.
+		 * @param string   $note    Optional order note.
+		 * @param array    $context Optional UI/API context.
 		 * @return void
 		 */
-		private static function set_mixed_recovery_status( $order, $status, $note = '' ) {
+		private static function set_mixed_recovery_status( $order, $status, $note = '', $context = array() ) {
 			if ( ! $order instanceof WC_Order ) {
 				return;
 			}
 
 			$current = (string) $order->get_meta( self::META_RECOVERY_STATUS, true );
 
-			if ( $current === $status ) {
+			if ( $current === $status && empty( $context ) ) {
 				return;
 			}
 
 			$order->update_meta_data( self::META_RECOVERY_STATUS, $status );
+			$order->update_meta_data(
+				self::META_RECOVERY_CONTEXT,
+				array_merge(
+					array(
+						'status'         => $status,
+						'user_message'   => '',
+						'action'         => '',
+						'updated_at_gmt' => gmdate( 'Y-m-d H:i:s' ),
+					),
+					array_filter(
+						(array) $context,
+						function ( $value ) {
+							return null !== $value && '' !== $value;
+						}
+					)
+				)
+			);
 
-			if ( '' !== $note ) {
+			if ( '' !== $note && $current !== $status ) {
 				$order->add_order_note( $note );
 			}
 
 			$order->save();
+		}
+
+		/**
+		 * Mark mixed-recovery orders whose money payment failed.
+		 *
+		 * @param int $order_id Order ID.
+		 * @return void
+		 */
+		public static function mark_mixed_recovery_payment_failed( $order_id ) {
+			$order = wc_get_order( $order_id );
+
+			if ( ! $order || 'mixed_recovery' !== $order->get_meta( self::META_CHECKOUT_MODE, true ) || $order->get_meta( self::META_DEBIT_TXN, true ) ) {
+				return;
+			}
+
+			self::set_mixed_recovery_status(
+				$order,
+				'payment_failed',
+				__( 'Mixed recovery payment failed before Zencoin booking finalization. No booking Zencoins were debited.', 'coin-booking-bridge' ),
+				array(
+					'user_message' => __( 'Something went wrong while processing payment. Please try again or use a different payment method.', 'coin-booking-bridge' ),
+					'action'       => 'try_again',
+				)
+			);
+		}
+
+		/**
+		 * Re-check mixed-recovery booking availability before spending Zencoins.
+		 *
+		 * @param WC_Order $order Order object.
+		 * @return true|WP_Error
+		 */
+		private static function check_mixed_recovery_booking_availability( $order ) {
+			if ( ! $order instanceof WC_Order || ! function_exists( 'get_wc_booking' ) || ! class_exists( 'WC_Booking_Data_Store' ) ) {
+				return true;
+			}
+
+			$booking_ids = WC_Booking_Data_Store::get_booking_ids_from_order_id( $order->get_id() );
+
+			if ( empty( $booking_ids ) ) {
+				return true;
+			}
+
+			$result = self::with_order_bookings_excluded_from_availability(
+				$booking_ids,
+				function () use ( $booking_ids ) {
+					foreach ( $booking_ids as $booking_id ) {
+						$booking = get_wc_booking( $booking_id );
+
+						if ( ! $booking || $booking->has_status( array( 'cancelled', 'trash' ) ) ) {
+							return new WP_Error( 'booking_unavailable', __( 'The selected booking is no longer available.', 'coin-booking-bridge' ) );
+						}
+
+						$product = method_exists( $booking, 'get_product' ) ? $booking->get_product() : false;
+
+						if ( ! $product || ! method_exists( $product, 'is_bookable' ) ) {
+							return new WP_Error( 'booking_product_unavailable', __( 'The selected booking product is no longer available.', 'coin-booking-bridge' ) );
+						}
+
+						$data     = self::build_booking_validation_data_from_booking( $booking, $product );
+						$validate = $product->is_bookable( $data );
+
+						if ( is_wp_error( $validate ) ) {
+							return $validate;
+						}
+					}
+
+					return true;
+				}
+			);
+
+			/**
+			 * Allow site-specific availability integrations to refine the final
+			 * paid-before-debit mixed-recovery decision.
+			 *
+			 * @param true|WP_Error $result      Availability result.
+			 * @param WC_Order      $order       Order object.
+			 * @param array         $booking_ids Booking IDs attached to the order.
+			 */
+			return apply_filters( 'cbb_mixed_recovery_booking_availability_result', $result, $order, $booking_ids );
+		}
+
+		/**
+		 * Build Woo Bookings validation data from an already-created booking.
+		 *
+		 * @param WC_Booking         $booking Booking object.
+		 * @param WC_Product_Booking $product Booking product.
+		 * @return array
+		 */
+		private static function build_booking_validation_data_from_booking( $booking, $product ) {
+			$start     = method_exists( $booking, 'get_start' ) ? (int) $booking->get_start( 'edit' ) : 0;
+			$end       = method_exists( $booking, 'get_end' ) ? (int) $booking->get_end( 'edit' ) : 0;
+			$persons   = method_exists( $booking, 'get_persons' ) ? (array) $booking->get_persons() : array();
+			$duration  = 1;
+			$unit      = method_exists( $product, 'get_duration_unit' ) ? $product->get_duration_unit() : '';
+			$base      = method_exists( $product, 'get_duration' ) ? max( 1, (int) $product->get_duration() ) : 1;
+			$qty       = 1;
+
+			if ( method_exists( $product, 'is_duration_type' ) && $product->is_duration_type( 'customer' ) && $start > 0 && $end > $start ) {
+				$seconds_per_block = 'hour' === $unit ? $base * HOUR_IN_SECONDS : ( 'day' === $unit ? $base * DAY_IN_SECONDS : $base * MINUTE_IN_SECONDS );
+				$duration          = max( 1, (int) ceil( ( $end - $start ) / max( 1, $seconds_per_block ) ) );
+			}
+
+			if ( method_exists( $product, 'get_has_person_qty_multiplier' ) && $product->get_has_person_qty_multiplier() && ! empty( $persons ) ) {
+				$qty = max( 1, array_sum( array_map( 'absint', $persons ) ) );
+			}
+
+			return array(
+				'_start_date'    => $start,
+				'_end_date'      => $end,
+				'_date'          => $start ? date( 'Y-m-d', $start ) : '',
+				'date'           => $start ? date_i18n( wc_bookings_date_format(), $start ) : '',
+				'_time'          => $start ? date( 'G:i', $start ) : '',
+				'time'           => $start ? date_i18n( wc_bookings_time_format(), $start ) : '',
+				'_duration'      => $duration,
+				'_duration_unit' => $unit,
+				'_resource_id'   => method_exists( $booking, 'get_resource_id' ) ? (int) $booking->get_resource_id( 'edit' ) : 0,
+				'_qty'           => $qty,
+				'_persons'       => $persons,
+			);
+		}
+
+		/**
+		 * Run an availability callback while excluding this order's own bookings.
+		 *
+		 * @param array    $booking_ids Booking IDs to exclude.
+		 * @param callable $callback    Availability callback.
+		 * @return mixed
+		 */
+		private static function with_order_bookings_excluded_from_availability( $booking_ids, $callback ) {
+			global $wpdb;
+
+			$booking_ids = wp_parse_id_list( $booking_ids );
+			$statuses    = array();
+
+			foreach ( $booking_ids as $booking_id ) {
+				$statuses[ $booking_id ] = get_post_status( $booking_id );
+				$wpdb->update(
+					$wpdb->posts,
+					array( 'post_status' => 'was-in-cart' ),
+					array( 'ID' => $booking_id ),
+					array( '%s' ),
+					array( '%d' )
+				);
+				clean_post_cache( $booking_id );
+			}
+
+			self::clear_bookings_availability_cache();
+
+			try {
+				$result = is_callable( $callback ) ? call_user_func( $callback ) : true;
+			} finally {
+				foreach ( $statuses as $booking_id => $status ) {
+					if ( $status ) {
+						$wpdb->update(
+							$wpdb->posts,
+							array( 'post_status' => $status ),
+							array( 'ID' => $booking_id ),
+							array( '%s' ),
+							array( '%d' )
+						);
+						clean_post_cache( $booking_id );
+					}
+				}
+
+				self::clear_bookings_availability_cache();
+			}
+
+			return $result;
+		}
+
+		/**
+		 * Clear Woo Bookings availability caches after temporary status changes.
+		 *
+		 * @return void
+		 */
+		private static function clear_bookings_availability_cache() {
+			if ( class_exists( 'WC_Bookings_Cache' ) && method_exists( 'WC_Bookings_Cache', 'delete_booking_slots_transient' ) ) {
+				WC_Bookings_Cache::delete_booking_slots_transient();
+			}
+
+			if ( class_exists( 'WC_Cache_Helper' ) ) {
+				WC_Cache_Helper::get_transient_version( 'bookings', true );
+			}
 		}
 
 		/**
