@@ -1123,7 +1123,7 @@ Included so far:
   - `payment_failed` -> payment retry popup
   - `booking_full` -> class-full schedule popup
   - `booking_failed` -> technical booking-failed popup
-- `zen-checkout-flow` version `0.1.31` can read these result states from WooCommerce result URLs, render the matching popup, and complete enough-ZC `zencoin_booking` carts without payment gateways.
+- `zen-checkout-flow` version `0.1.33` can read these result states from WooCommerce result URLs, render the matching popup, and complete enough-ZC `zencoin_booking` carts without payment gateways.
 
 Still planned:
 
