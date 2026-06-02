@@ -7,7 +7,7 @@
 	--zen-coin-tooltip-ink: #3f3d3d;
 	align-items: center;
 	background: var(--zen-coin-bg);
-	border: 2px solid var(--zen-coin-ink);
+	border: 1px solid var(--zen-coin-ink);
 	border-radius: 50%;
 	color: var(--zen-coin-ink);
 	display: inline-flex;
@@ -62,7 +62,7 @@
 .zbp-coins[data-cbb-zencoin-enhanced="1"] > .zen-coin-global,
 .zbp-join-zencoins[data-cbb-zencoin-enhanced="1"] > .zen-coin-global {
 	background: var(--zen-coin-bg) !important;
-	border: 2px solid var(--zen-coin-ink) !important;
+	border: 1px solid var(--zen-coin-ink) !important;
 	border-radius: 50% !important;
 	height: var(--zen-coin-size) !important;
 	min-height: 0 !important;
@@ -80,7 +80,7 @@
 .zbp-coins[data-cbb-zencoin-enhanced="1"] > .zen-coin-global > .zen-coin-global__ring,
 .zbp-join-zencoins[data-cbb-zencoin-enhanced="1"] > .zen-coin-global > .zen-coin-global__ring {
 	background: transparent !important;
-	border: 2px solid var(--zen-coin-ink) !important;
+	border: 1px solid var(--zen-coin-ink) !important;
 	border-radius: 50% !important;
 	color: inherit !important;
 	display: block !important;
