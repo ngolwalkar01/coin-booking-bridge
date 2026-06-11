@@ -9,6 +9,7 @@
 	background: var(--zen-coin-bg);
 	border: 1px solid var(--zen-coin-ink);
 	border-radius: 50%;
+	box-sizing: border-box;
 	color: var(--zen-coin-ink);
 	display: inline-flex;
 	flex: 0 0 auto;
@@ -22,6 +23,12 @@
 	width: var(--zen-coin-size);
 }
 
+.zen-coin-global *,
+.zen-coin-global *::before,
+.zen-coin-global *::after {
+	box-sizing: border-box;
+}
+
 .zen-coin-global__ring {
 	border: 2px solid var(--zen-coin-ink);
 	border-radius: 50%;
@@ -31,8 +38,19 @@
 }
 
 .zen-coin-global__value {
+	align-items: center;
 	color: var(--zen-coin-ink);
-	position: relative;
+	display: flex;
+	font-size: inherit;
+	height: 100%;
+	inset: 0;
+	justify-content: center;
+	line-height: 1;
+	margin: 0;
+	padding: 0;
+	position: absolute;
+	text-align: center;
+	width: 100%;
 	z-index: 1;
 }
 
@@ -143,19 +161,19 @@
 
 .cbb-zencoin-tooltip {
 	--zen-coin-tooltip-bg: #d8b354;
-	--zen-coin-tooltip-border: #9a9a9a;
+	--zen-coin-tooltip-border: #d8b354;
 	--zen-coin-tooltip-ink: #3f3d3d;
 	background: var(--zen-coin-tooltip-bg);
-	border: 2px solid var(--zen-coin-tooltip-border);
+	border: 0;
 	border-radius: 7px;
 	box-shadow: none;
 	color: var(--zen-coin-tooltip-ink);
 	font-size: 18px;
 	font-weight: 500;
-	line-height: 1.38;
+	line-height: 1.42;
 	max-width: calc(100vw - 32px);
 	opacity: 0;
-	padding: 12px 14px;
+	padding: 12px 13px;
 	pointer-events: none;
 	position: fixed;
 	text-align: left;
@@ -163,26 +181,12 @@
 	transition: opacity 160ms ease, transform 160ms ease;
 	visibility: hidden;
 	white-space: normal;
-	width: 290px;
+	width: 263px;
 	z-index: 2147483647;
 }
 
 .cbb-zencoin-tooltip::before {
-	border: 6px solid transparent;
-	border-bottom-color: var(--zen-coin-tooltip-border);
-	content: "";
-	left: var(--cbb-zencoin-tooltip-arrow-left, 50%);
-	pointer-events: none;
-	position: absolute;
-	top: -14px;
-	transform: translateX(-50%);
-}
-
-.cbb-zencoin-tooltip.is-above::before {
-	border-bottom-color: transparent;
-	border-top-color: var(--zen-coin-tooltip-border);
-	bottom: -14px;
-	top: auto;
+	content: none;
 }
 
 .cbb-zencoin-tooltip.is-active {

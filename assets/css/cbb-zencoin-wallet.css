@@ -96,7 +96,9 @@
 }
 
 .cbb-zencoin-wallet__coin.zen-coin-global .zen-coin-global__value {
-	display: block;
+	align-items: center;
+	display: flex;
+	justify-content: center;
 	line-height: 1;
 	margin: 0;
 }
