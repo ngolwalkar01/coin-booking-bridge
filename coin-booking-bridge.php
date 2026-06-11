@@ -1097,20 +1097,21 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				return;
 			}
 
-			$asset_url = plugin_dir_url( __FILE__ ) . 'assets/';
+			$asset_url  = plugin_dir_url( __FILE__ ) . 'assets/';
+			$asset_path = plugin_dir_path( __FILE__ ) . 'assets/';
 
 			wp_enqueue_style(
 				'cbb-zencoin-global',
 				$asset_url . 'css/cbb-zencoin-global.css',
 				array(),
-				self::VERSION
+				self::get_asset_version( $asset_path . 'css/cbb-zencoin-global.css' )
 			);
 
 			wp_enqueue_script(
 				'cbb-zencoin-global',
 				$asset_url . 'js/cbb-zencoin-global.js',
 				array(),
-				self::VERSION,
+				self::get_asset_version( $asset_path . 'js/cbb-zencoin-global.js' ),
 				true
 			);
 
@@ -1149,19 +1150,32 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				return;
 			}
 
+			$asset_url  = plugin_dir_url( __FILE__ ) . 'assets/';
+			$asset_path = plugin_dir_path( __FILE__ ) . 'assets/';
+
 			wp_enqueue_style(
 				'cbb-zencoin-global',
-				plugin_dir_url( __FILE__ ) . 'assets/css/cbb-zencoin-global.css',
+				$asset_url . 'css/cbb-zencoin-global.css',
 				array(),
-				self::VERSION
+				self::get_asset_version( $asset_path . 'css/cbb-zencoin-global.css' )
 			);
 
 			wp_enqueue_style(
 				'cbb-zencoin-wallet',
-				plugin_dir_url( __FILE__ ) . 'assets/css/cbb-zencoin-wallet.css',
+				$asset_url . 'css/cbb-zencoin-wallet.css',
 				array( 'cbb-zencoin-global' ),
-				self::VERSION
+				self::get_asset_version( $asset_path . 'css/cbb-zencoin-wallet.css' )
 			);
+		}
+
+		/**
+		 * Get a cache-busting asset version from the file modification time.
+		 *
+		 * @param string $path Absolute asset path.
+		 * @return string
+		 */
+		private static function get_asset_version( $path ) {
+			return file_exists( $path ) ? (string) filemtime( $path ) : self::VERSION;
 		}
 
 		/**
