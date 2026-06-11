@@ -1,0 +1,248 @@
+.cbb-zencoin-wallet {
+	--cbb-wallet-gold: #e2be52;
+	--cbb-wallet-text: #f4f1e8;
+	--cbb-wallet-muted: rgba(244, 241, 232, 0.68);
+	--cbb-wallet-border: rgba(244, 241, 232, 0.58);
+	--cbb-wallet-panel: rgba(98, 80, 53, 0.52);
+	color: var(--cbb-wallet-text);
+}
+
+.cbb-zencoin-wallet a {
+	color: inherit;
+}
+
+.cbb-zencoin-wallet__profile {
+	display: grid;
+	grid-template-columns: 64px minmax(0, 1fr);
+	gap: 18px;
+	align-items: center;
+	margin-bottom: 30px;
+}
+
+.cbb-zencoin-wallet__avatar {
+	width: 64px;
+	height: 64px;
+	border-radius: 50%;
+	object-fit: cover;
+}
+
+.cbb-zencoin-wallet__profile strong,
+.cbb-zencoin-wallet__profile span {
+	display: block;
+	line-height: 1.35;
+}
+
+.cbb-zencoin-wallet__profile strong {
+	font-size: 22px;
+	font-weight: 500;
+}
+
+.cbb-zencoin-wallet__profile span {
+	margin-top: 4px;
+	color: var(--cbb-wallet-muted);
+	font-size: 18px;
+}
+
+.cbb-zencoin-wallet__balance {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 24px;
+	margin-bottom: 12px;
+	padding: 20px 18px;
+	border-radius: 8px;
+	background: var(--cbb-wallet-panel);
+}
+
+.cbb-zencoin-wallet__balance span,
+.cbb-zencoin-wallet__balance strong {
+	display: block;
+}
+
+.cbb-zencoin-wallet__balance span {
+	margin-bottom: 8px;
+	font-size: 19px;
+}
+
+.cbb-zencoin-wallet__balance strong {
+	color: var(--cbb-wallet-gold);
+	font-size: 20px;
+	font-weight: 700;
+}
+
+.cbb-zencoin-wallet__coin.zen-coin-global {
+	flex: 0 0 auto;
+}
+
+.cbb-zencoin-wallet__topup {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 56px;
+	margin: 0 0 12px;
+	border: 2px solid var(--cbb-wallet-gold);
+	border-radius: 999px;
+	color: var(--cbb-wallet-gold);
+	font-size: 18px;
+	font-weight: 700;
+	text-decoration: none;
+	background: rgba(63, 63, 65, 0.62);
+}
+
+.cbb-zencoin-wallet__topup:hover,
+.cbb-zencoin-wallet__topup:focus {
+	background: rgba(226, 190, 82, 0.14);
+	color: var(--cbb-wallet-gold);
+}
+
+.cbb-zencoin-wallet__redeem {
+	display: table;
+	margin: 0 auto 34px;
+	color: var(--cbb-wallet-gold);
+	font-size: 18px;
+	font-weight: 700;
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+
+.cbb-zencoin-wallet__empty {
+	margin: 0;
+	font-size: 21px;
+	line-height: 1.4;
+}
+
+.cbb-zencoin-wallet__activity h2 {
+	margin: 0 0 14px;
+	font-size: 21px;
+	font-weight: 400;
+	line-height: 1.35;
+}
+
+.cbb-zencoin-wallet__filter {
+	position: absolute;
+	opacity: 0;
+	pointer-events: none;
+}
+
+.cbb-zencoin-wallet__tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-bottom: 14px;
+}
+
+.cbb-zencoin-wallet__tabs label {
+	min-width: 82px;
+	padding: 10px 22px;
+	border: 2px solid var(--cbb-wallet-border);
+	border-radius: 999px;
+	color: var(--cbb-wallet-text);
+	font-size: 17px;
+	line-height: 1;
+	text-align: center;
+	cursor: pointer;
+	background: rgba(63, 63, 65, 0.86);
+}
+
+#cbb-zencoin-filter-all:checked ~ .cbb-zencoin-wallet__tabs label[for="cbb-zencoin-filter-all"],
+#cbb-zencoin-filter-added:checked ~ .cbb-zencoin-wallet__tabs label[for="cbb-zencoin-filter-added"],
+#cbb-zencoin-filter-used:checked ~ .cbb-zencoin-wallet__tabs label[for="cbb-zencoin-filter-used"] {
+	border-color: var(--cbb-wallet-gold);
+	background: var(--cbb-wallet-gold);
+	color: #3f3f42;
+}
+
+.cbb-zencoin-wallet__list {
+	display: grid;
+	gap: 10px;
+}
+
+.cbb-zencoin-wallet__item {
+	display: grid;
+	gap: 10px;
+	padding: 14px 18px;
+	border: 1px solid var(--cbb-wallet-border);
+	border-radius: 10px;
+	background: rgba(31, 32, 29, 0.34);
+}
+
+.cbb-zencoin-wallet__item-head {
+	display: flex;
+	justify-content: space-between;
+	gap: 18px;
+	align-items: baseline;
+}
+
+.cbb-zencoin-wallet__item-head strong {
+	color: var(--cbb-wallet-gold);
+	font-size: 18px;
+	font-weight: 700;
+}
+
+.cbb-zencoin-wallet__item-head span,
+.cbb-zencoin-wallet__item-expiry {
+	color: var(--cbb-wallet-muted);
+	font-size: 17px;
+}
+
+.cbb-zencoin-wallet__item-label {
+	font-size: 18px;
+	line-height: 1.35;
+}
+
+#cbb-zencoin-filter-added:checked ~ .cbb-zencoin-wallet__list [data-cbb-zencoin-activity="used"],
+#cbb-zencoin-filter-used:checked ~ .cbb-zencoin-wallet__list [data-cbb-zencoin-activity="added"] {
+	display: none;
+}
+
+@media (min-width: 768px) {
+	.cbb-zencoin-wallet {
+		max-width: 720px;
+	}
+}
+
+@media (max-width: 767px) {
+	.cbb-zencoin-wallet__profile {
+		grid-template-columns: 54px minmax(0, 1fr);
+		gap: 16px;
+		margin-bottom: 28px;
+	}
+
+	.cbb-zencoin-wallet__avatar {
+		width: 54px;
+		height: 54px;
+	}
+
+	.cbb-zencoin-wallet__profile strong {
+		font-size: 17px;
+	}
+
+	.cbb-zencoin-wallet__profile span {
+		font-size: 16px;
+	}
+
+	.cbb-zencoin-wallet__balance {
+		padding: 18px;
+	}
+
+	.cbb-zencoin-wallet__balance span,
+	.cbb-zencoin-wallet__balance strong {
+		font-size: 18px;
+	}
+
+	.cbb-zencoin-wallet__topup {
+		min-height: 52px;
+		font-size: 17px;
+	}
+
+	.cbb-zencoin-wallet__redeem,
+	.cbb-zencoin-wallet__item-label,
+	.cbb-zencoin-wallet__item-head strong {
+		font-size: 17px;
+	}
+
+	.cbb-zencoin-wallet__item-head span,
+	.cbb-zencoin-wallet__item-expiry {
+		font-size: 16px;
+	}
+}

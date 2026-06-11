@@ -81,6 +81,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			}
 
 			add_action( 'wp_enqueue_scripts', array( __CLASS__, 'enqueue_global_coin_assets' ) );
+			add_action( 'wp_enqueue_scripts', array( __CLASS__, 'enqueue_wallet_endpoint_assets' ) );
 			add_shortcode( 'zencoin_coin', array( __CLASS__, 'render_global_coin_shortcode' ) );
 
 			if ( is_admin() ) {
@@ -100,6 +101,12 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			if ( ! self::dependencies_loaded() ) {
 				return;
 			}
+
+			if ( class_exists( 'Woo_Wallet_Frontend' ) ) {
+				remove_action( 'woocommerce_account_woo-wallet_endpoint', array( Woo_Wallet_Frontend::instance(), 'woo_wallet_endpoint_content' ) );
+			}
+
+			add_action( 'woocommerce_account_woo-wallet_endpoint', array( __CLASS__, 'render_zencoin_wallet_endpoint' ) );
 
 			add_action( 'woocommerce_subscription_payment_complete', array( __CLASS__, 'credit_subscription_coins' ), 20, 1 );
 			add_action( 'woocommerce_subscription_renewal_payment_complete', array( __CLASS__, 'credit_subscription_renewal_coins' ), 20, 2 );
@@ -1132,6 +1139,270 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 					),
 				)
 			);
+		}
+
+		/**
+		 * Enqueue Zencoin wallet endpoint styles only on the wallet account route.
+		 */
+		public static function enqueue_wallet_endpoint_assets() {
+			if ( ! self::is_zencoin_wallet_endpoint() ) {
+				return;
+			}
+
+			wp_enqueue_style(
+				'cbb-zencoin-global',
+				plugin_dir_url( __FILE__ ) . 'assets/css/cbb-zencoin-global.css',
+				array(),
+				self::VERSION
+			);
+
+			wp_enqueue_style(
+				'cbb-zencoin-wallet',
+				plugin_dir_url( __FILE__ ) . 'assets/css/cbb-zencoin-wallet.css',
+				array( 'cbb-zencoin-global' ),
+				self::VERSION
+			);
+		}
+
+		/**
+		 * Check if the current request is the Woo Wallet account endpoint.
+		 *
+		 * @return bool
+		 */
+		private static function is_zencoin_wallet_endpoint() {
+			return function_exists( 'is_account_page' )
+				&& is_account_page()
+				&& function_exists( 'is_wc_endpoint_url' )
+				&& is_wc_endpoint_url( 'woo-wallet' );
+		}
+
+		/**
+		 * Render the custom Zencoin wallet account endpoint.
+		 */
+		public static function render_zencoin_wallet_endpoint() {
+			if ( ! is_user_logged_in() ) {
+				return;
+			}
+
+			if ( function_exists( 'is_wallet_account_locked' ) && is_wallet_account_locked() && function_exists( 'woo_wallet' ) ) {
+				woo_wallet()->get_template( 'no-access.php' );
+				return;
+			}
+
+			$user_id      = get_current_user_id();
+			$user         = wp_get_current_user();
+			$balance      = self::get_available_coin_balance( $user_id );
+			$transactions = self::get_zencoin_wallet_activity( $user_id );
+			$has_activity = ! empty( $transactions );
+			$topup_url    = apply_filters( 'cbb_zencoin_wallet_topup_url', home_url( '/prices/' ) );
+			$redeem_url   = apply_filters( 'cbb_zencoin_wallet_redeem_url', '#' );
+
+			?>
+			<div class="cbb-zencoin-wallet" data-cbb-zencoin-wallet>
+				<section class="cbb-zencoin-wallet__profile">
+					<?php echo get_avatar( $user_id, 64, '', '', array( 'class' => 'cbb-zencoin-wallet__avatar' ) ); ?>
+					<div>
+						<strong><?php echo esc_html( $user->display_name ? $user->display_name : $user->user_login ); ?></strong>
+						<span><?php echo esc_html( $user->user_email ); ?></span>
+					</div>
+				</section>
+
+				<section class="cbb-zencoin-wallet__balance" aria-label="<?php echo esc_attr__( 'Current Zencoin balance', 'coin-booking-bridge' ); ?>">
+					<div>
+						<span><?php esc_html_e( 'Current Balance:', 'coin-booking-bridge' ); ?></span>
+						<strong><?php esc_html_e( 'ZENCOINS:', 'coin-booking-bridge' ); ?></strong>
+					</div>
+					<?php echo self::render_global_zencoin_coin( self::format_zencoin_display_amount( $balance ), array( 'class' => 'cbb-zencoin-wallet__coin' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+				</section>
+
+				<a class="cbb-zencoin-wallet__topup" href="<?php echo esc_url( $topup_url ); ?>">
+					<?php esc_html_e( 'Top-Up Zencoins', 'coin-booking-bridge' ); ?>
+				</a>
+				<a class="cbb-zencoin-wallet__redeem" href="<?php echo esc_url( $redeem_url ); ?>">
+					<?php esc_html_e( 'Redeem voucher code', 'coin-booking-bridge' ); ?>
+				</a>
+
+				<?php if ( ! $has_activity ) : ?>
+					<p class="cbb-zencoin-wallet__empty"><?php esc_html_e( 'No activity yet', 'coin-booking-bridge' ); ?></p>
+				<?php else : ?>
+					<section class="cbb-zencoin-wallet__activity">
+						<h2><?php esc_html_e( 'Recent Activity:', 'coin-booking-bridge' ); ?></h2>
+						<input class="cbb-zencoin-wallet__filter" type="radio" name="cbb_zencoin_wallet_filter" id="cbb-zencoin-filter-all" checked />
+						<input class="cbb-zencoin-wallet__filter" type="radio" name="cbb_zencoin_wallet_filter" id="cbb-zencoin-filter-added" />
+						<input class="cbb-zencoin-wallet__filter" type="radio" name="cbb_zencoin_wallet_filter" id="cbb-zencoin-filter-used" />
+
+						<div class="cbb-zencoin-wallet__tabs" role="tablist" aria-label="<?php echo esc_attr__( 'Transaction filters', 'coin-booking-bridge' ); ?>">
+							<label for="cbb-zencoin-filter-all"><?php esc_html_e( 'All', 'coin-booking-bridge' ); ?></label>
+							<label for="cbb-zencoin-filter-added"><?php esc_html_e( 'Added', 'coin-booking-bridge' ); ?></label>
+							<label for="cbb-zencoin-filter-used"><?php esc_html_e( 'Used', 'coin-booking-bridge' ); ?></label>
+						</div>
+
+						<div class="cbb-zencoin-wallet__list">
+							<?php foreach ( $transactions as $transaction ) : ?>
+								<?php self::render_zencoin_wallet_activity_item( $transaction ); ?>
+							<?php endforeach; ?>
+						</div>
+					</section>
+				<?php endif; ?>
+			</div>
+			<?php
+		}
+
+		/**
+		 * Render one Zencoin activity item.
+		 *
+		 * @param array $transaction Transaction row.
+		 */
+		private static function render_zencoin_wallet_activity_item( $transaction ) {
+			$direction = 'debit' === $transaction['direction'] ? 'used' : 'added';
+			$amount    = self::format_zencoin_display_amount( $transaction['amount'] );
+			$date      = $transaction['created_at'] ? mysql2date( 'd M Y', $transaction['created_at'] ) : '';
+			$expires   = ! empty( $transaction['expires_at'] ) ? mysql2date( 'd M Y', $transaction['expires_at'] ) : '';
+			?>
+			<article class="cbb-zencoin-wallet__item cbb-zencoin-wallet__item--<?php echo esc_attr( $direction ); ?>" data-cbb-zencoin-activity="<?php echo esc_attr( $direction ); ?>">
+				<div class="cbb-zencoin-wallet__item-head">
+					<strong><?php echo esc_html( ( 'used' === $direction ? '- ' : '+ ' ) . $amount . ' ZC' ); ?></strong>
+					<span><?php echo esc_html( $date ); ?></span>
+				</div>
+				<div class="cbb-zencoin-wallet__item-label"><?php echo esc_html( $transaction['label'] ); ?></div>
+				<?php if ( $expires && 'used' !== $direction ) : ?>
+					<div class="cbb-zencoin-wallet__item-expiry">
+						<?php
+						echo esc_html(
+							sprintf(
+								/* translators: %s: expiry date */
+								__( 'Expires %s', 'coin-booking-bridge' ),
+								$expires
+							)
+						);
+						?>
+					</div>
+				<?php endif; ?>
+			</article>
+			<?php
+		}
+
+		/**
+		 * Get Zencoin wallet activity from CBB ledger, with Tera Wallet fallback.
+		 *
+		 * @param int $user_id User ID.
+		 * @return array
+		 */
+		private static function get_zencoin_wallet_activity( $user_id ) {
+			$ledger_activity = self::get_zencoin_ledger_activity( $user_id );
+
+			if ( ! empty( $ledger_activity ) ) {
+				return $ledger_activity;
+			}
+
+			return self::get_tera_wallet_activity_fallback( $user_id );
+		}
+
+		/**
+		 * Get customer activity from the CBB ledger.
+		 *
+		 * @param int $user_id User ID.
+		 * @return array
+		 */
+		private static function get_zencoin_ledger_activity( $user_id ) {
+			global $wpdb;
+
+			$ledger_table  = self::get_ledger_table_name();
+			$buckets_table = self::get_buckets_table_name();
+			$has_buckets   = self::table_exists( $buckets_table );
+
+			if ( ! self::table_exists( $ledger_table ) ) {
+				return array();
+			}
+
+			$select_expiry = $has_buckets ? 'buckets.expires_at' : 'NULL AS expires_at';
+			$join_buckets  = $has_buckets ? "LEFT JOIN {$buckets_table} AS buckets ON ledger.bucket_id = buckets.id" : '';
+
+			$rows = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT ledger.id, ledger.direction, ledger.amount, ledger.label, ledger.created_at, {$select_expiry}
+					FROM {$ledger_table} AS ledger
+					{$join_buckets}
+					WHERE ledger.user_id = %d
+					ORDER BY ledger.created_at DESC, ledger.id DESC
+					LIMIT 100",
+					$user_id
+				),
+				ARRAY_A
+			);
+
+			if ( empty( $rows ) ) {
+				return array();
+			}
+
+			return array_map(
+				static function ( $row ) {
+					return array(
+						'id'         => absint( $row['id'] ),
+						'direction'  => sanitize_key( $row['direction'] ),
+						'amount'     => (float) $row['amount'],
+						'label'      => wp_strip_all_tags( (string) $row['label'] ),
+						'created_at' => sanitize_text_field( (string) $row['created_at'] ),
+						'expires_at' => ! empty( $row['expires_at'] ) ? sanitize_text_field( (string) $row['expires_at'] ) : '',
+					);
+				},
+				$rows
+			);
+		}
+
+		/**
+		 * Get Tera Wallet transactions if the CBB ledger has no activity yet.
+		 *
+		 * @param int $user_id User ID.
+		 * @return array
+		 */
+		private static function get_tera_wallet_activity_fallback( $user_id ) {
+			if ( ! function_exists( 'get_wallet_transactions' ) ) {
+				return array();
+			}
+
+			$transactions = get_wallet_transactions(
+				array(
+					'user_id'  => $user_id,
+					'limit'    => 100,
+					'order_by' => 'transaction_id',
+					'order'    => 'DESC',
+				)
+			);
+
+			if ( empty( $transactions ) ) {
+				return array();
+			}
+
+			return array_map(
+				static function ( $transaction ) {
+					return array(
+						'id'         => absint( $transaction->transaction_id ),
+						'direction'  => 'debit' === $transaction->type ? 'debit' : 'credit',
+						'amount'     => (float) $transaction->amount,
+						'label'      => wp_strip_all_tags( (string) $transaction->details ),
+						'created_at' => sanitize_text_field( (string) $transaction->date ),
+						'expires_at' => '',
+					);
+				},
+				$transactions
+			);
+		}
+
+		/**
+		 * Format a Zencoin amount for display.
+		 *
+		 * @param float $amount Amount.
+		 * @return string
+		 */
+		private static function format_zencoin_display_amount( $amount ) {
+			$amount = (float) $amount;
+
+			if ( abs( $amount - round( $amount ) ) < 0.000001 ) {
+				return (string) absint( round( $amount ) );
+			}
+
+			return wc_format_decimal( $amount, 2 );
 		}
 
 		/**
