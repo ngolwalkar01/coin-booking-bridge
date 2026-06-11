@@ -159,15 +159,13 @@
 	cursor: help;
 }
 
-.cbb-zencoin-tooltip {
-	--zen-coin-tooltip-bg: #d8b354;
-	--zen-coin-tooltip-border: #d8b354;
-	--zen-coin-tooltip-ink: #3f3d3d;
+.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""])::after {
 	background: var(--zen-coin-tooltip-bg);
 	border: 0;
 	border-radius: 7px;
 	box-shadow: none;
 	color: var(--zen-coin-tooltip-ink);
+	content: attr(data-zencoin-tooltip);
 	font-size: 18px;
 	font-weight: 500;
 	line-height: 1.42;
@@ -175,22 +173,48 @@
 	opacity: 0;
 	padding: 12px 13px;
 	pointer-events: none;
-	position: fixed;
+	position: absolute;
 	text-align: left;
-	transform: translateY(-4px);
+	top: calc(100% + 14px);
+	transform: translate(-50%, -4px);
 	transition: opacity 160ms ease, transform 160ms ease;
 	visibility: hidden;
 	white-space: normal;
 	width: 263px;
-	z-index: 2147483647;
+	z-index: 100000;
 }
 
-.cbb-zencoin-tooltip::before {
-	content: none;
+.zen-coin-global[data-zencoin-tooltip-align="center"]::after {
+	left: 50%;
+	right: auto;
 }
 
-.cbb-zencoin-tooltip.is-active {
+.zen-coin-global[data-zencoin-tooltip-align="left"]::after {
+	left: 0;
+	right: auto;
+	transform: translate(0, -4px);
+}
+
+.zen-coin-global[data-zencoin-tooltip-align="right"]::after {
+	left: auto;
+	right: 0;
+	transform: translate(0, -4px);
+}
+
+.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""]):hover::after,
+.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""]):focus::after {
 	opacity: 1;
-	transform: translateY(0);
 	visibility: visible;
+}
+
+.zen-coin-global[data-zencoin-tooltip-align="center"]:hover::after,
+.zen-coin-global[data-zencoin-tooltip-align="center"]:focus::after {
+	transform: translate(-50%, 0);
+}
+
+.zen-coin-global[data-zencoin-tooltip-align="left"]:hover::after,
+.zen-coin-global[data-zencoin-tooltip-align="left"]:focus::after,
+.zen-coin-global[data-zencoin-tooltip-align="right"]:hover::after,
+.zen-coin-global[data-zencoin-tooltip-align="right"]:focus::after {
+	transform: translate(0, 0);
 }

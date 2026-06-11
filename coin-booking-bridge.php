@@ -1208,7 +1208,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				</section>
 
 				<section class="cbb-zencoin-wallet__balance" aria-label="<?php echo esc_attr__( 'Current Zencoin balance', 'coin-booking-bridge' ); ?>">
-					<div>
+					<div class="cbb-zencoin-wallet__balance-label">
 						<span><?php esc_html_e( 'Current Balance:', 'coin-booking-bridge' ); ?></span>
 						<strong><?php esc_html_e( 'ZENCOINS:', 'coin-booking-bridge' ); ?></strong>
 					</div>

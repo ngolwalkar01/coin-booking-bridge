@@ -70,7 +70,7 @@
 	display: block;
 }
 
-.cbb-zencoin-wallet__balance span {
+.cbb-zencoin-wallet__balance span.cbb-zencoin-wallet__balance-label {
 	margin-bottom: 8px;
 	font-size: 19px;
 }

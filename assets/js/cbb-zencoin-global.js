@@ -6,8 +6,6 @@
 	var rangeSelectors = Array.isArray( config.rangeSelectors ) ? config.rangeSelectors : [];
 	var tooltip = 'string' === typeof config.tooltip ? config.tooltip.trim() : '';
 	var observer = null;
-	var tooltipElement = null;
-	var activeTooltipCoin = null;
 
 	function getCoinValue( element ) {
 		var valueElement;
@@ -30,6 +28,7 @@
 
 		if ( tooltip ) {
 			coin.setAttribute( 'data-zencoin-tooltip', tooltip );
+			updateTooltipAlignment( coin );
 			coin.removeAttribute( 'title' );
 			label += '. ' + tooltip;
 		}
@@ -234,6 +233,32 @@
 		element.dataset.cbbZencoinRange = '1';
 	}
 
+	function updateTooltipAlignment( coin ) {
+		var tooltipWidth = 263;
+		var viewportPadding = 16;
+		var rect;
+		var center;
+
+		if ( ! coin || ! coin.getBoundingClientRect || ! coin.hasAttribute( 'data-zencoin-tooltip' ) ) {
+			return;
+		}
+
+		rect = coin.getBoundingClientRect();
+		center = rect.left + ( rect.width / 2 );
+
+		if ( center - ( tooltipWidth / 2 ) < viewportPadding ) {
+			coin.setAttribute( 'data-zencoin-tooltip-align', 'left' );
+			return;
+		}
+
+		if ( center + ( tooltipWidth / 2 ) > window.innerWidth - viewportPadding ) {
+			coin.setAttribute( 'data-zencoin-tooltip-align', 'right' );
+			return;
+		}
+
+		coin.setAttribute( 'data-zencoin-tooltip-align', 'center' );
+	}
+
 	function scan( root ) {
 		var scope = root && root.querySelectorAll ? root : document;
 		var rootElement = scope.nodeType === 1 ? scope : null;
@@ -259,6 +284,8 @@
 
 			scope.querySelectorAll( selector ).forEach( replaceCoinReference );
 		} );
+
+		scope.querySelectorAll( '.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""])' ).forEach( updateTooltipAlignment );
 	}
 
 	function startObserver() {
@@ -282,81 +309,12 @@
 		} );
 	}
 
-	function getTooltipElement() {
-		if ( tooltipElement ) {
-			return tooltipElement;
-		}
-
-		tooltipElement = document.createElement( 'div' );
-		tooltipElement.className = 'cbb-zencoin-tooltip';
-		tooltipElement.setAttribute( 'role', 'tooltip' );
-		document.body.appendChild( tooltipElement );
-
-		return tooltipElement;
-	}
-
-	function positionTooltip( coin, tooltipBox ) {
-		var coinRect = coin.getBoundingClientRect();
-		var tooltipRect = tooltipBox.getBoundingClientRect();
-		var viewportPadding = 16;
-		var left = coinRect.left + ( coinRect.width / 2 ) - ( tooltipRect.width / 2 );
-		var top = coinRect.bottom + 16;
-
-		left = Math.max( viewportPadding, Math.min( left, window.innerWidth - tooltipRect.width - viewportPadding ) );
-
-		if ( top + tooltipRect.height + viewportPadding > window.innerHeight ) {
-			top = Math.max( viewportPadding, coinRect.top - tooltipRect.height - 16 );
-			tooltipBox.classList.add( 'is-above' );
-		} else {
-			tooltipBox.classList.remove( 'is-above' );
-		}
-
-		tooltipBox.style.left = left + 'px';
-		tooltipBox.style.top = top + 'px';
-		tooltipBox.style.setProperty( '--cbb-zencoin-tooltip-arrow-left', ( coinRect.left + ( coinRect.width / 2 ) - left ) + 'px' );
-	}
-
-	function showTooltip( coin ) {
-		var text = coin.getAttribute( 'data-zencoin-tooltip' );
-		var tooltipBox;
-
-		if ( ! text ) {
-			return;
-		}
-
-		tooltipBox = getTooltipElement();
-		activeTooltipCoin = coin;
-		tooltipBox.textContent = text;
-		tooltipBox.classList.add( 'is-active' );
-		positionTooltip( coin, tooltipBox );
-	}
-
-	function hideTooltip( coin ) {
-		if ( coin && activeTooltipCoin && coin !== activeTooltipCoin ) {
-			return;
-		}
-
-		if ( tooltipElement ) {
-			tooltipElement.classList.remove( 'is-active' );
-		}
-
-		activeTooltipCoin = null;
-	}
-
 	function bindTooltipEvents() {
 		document.addEventListener( 'mouseover', function ( event ) {
 			var coin = event.target.closest && event.target.closest( '.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""])' );
 
 			if ( coin ) {
-				showTooltip( coin );
-			}
-		} );
-
-		document.addEventListener( 'mouseout', function ( event ) {
-			var coin = event.target.closest && event.target.closest( '.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""])' );
-
-			if ( coin && ! coin.contains( event.relatedTarget ) ) {
-				hideTooltip( coin );
+				updateTooltipAlignment( coin );
 			}
 		} );
 
@@ -364,28 +322,16 @@
 			var coin = event.target.closest && event.target.closest( '.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""])' );
 
 			if ( coin ) {
-				showTooltip( coin );
-			}
-		} );
-
-		document.addEventListener( 'focusout', function ( event ) {
-			var coin = event.target.closest && event.target.closest( '.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""])' );
-
-			if ( coin ) {
-				hideTooltip( coin );
+				updateTooltipAlignment( coin );
 			}
 		} );
 
 		window.addEventListener( 'scroll', function () {
-			if ( activeTooltipCoin && tooltipElement && tooltipElement.classList.contains( 'is-active' ) ) {
-				positionTooltip( activeTooltipCoin, tooltipElement );
-			}
+			document.querySelectorAll( '.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""])' ).forEach( updateTooltipAlignment );
 		}, true );
 
 		window.addEventListener( 'resize', function () {
-			if ( activeTooltipCoin && tooltipElement && tooltipElement.classList.contains( 'is-active' ) ) {
-				positionTooltip( activeTooltipCoin, tooltipElement );
-			}
+			document.querySelectorAll( '.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""])' ).forEach( updateTooltipAlignment );
 		} );
 	}
 
