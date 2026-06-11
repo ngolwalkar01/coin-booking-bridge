@@ -1437,7 +1437,6 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				data-zencoin-value="<?php echo esc_attr( $value ); ?>"
 				<?php if ( '' !== $tooltip ) : ?>
 					data-zencoin-tooltip="<?php echo esc_attr( $tooltip ); ?>"
-					title="<?php echo esc_attr( $tooltip ); ?>"
 				<?php endif; ?>
 				aria-label="<?php echo esc_attr( $label ); ?>"
 				tabindex="0"

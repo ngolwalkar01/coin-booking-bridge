@@ -6,6 +6,8 @@
 	var rangeSelectors = Array.isArray( config.rangeSelectors ) ? config.rangeSelectors : [];
 	var tooltip = 'string' === typeof config.tooltip ? config.tooltip.trim() : '';
 	var observer = null;
+	var tooltipElement = null;
+	var activeTooltipCoin = null;
 
 	function getCoinValue( element ) {
 		var valueElement;
@@ -28,7 +30,7 @@
 
 		if ( tooltip ) {
 			coin.setAttribute( 'data-zencoin-tooltip', tooltip );
-			coin.setAttribute( 'title', tooltip );
+			coin.removeAttribute( 'title' );
 			label += '. ' + tooltip;
 		}
 
@@ -280,13 +282,122 @@
 		} );
 	}
 
+	function getTooltipElement() {
+		if ( tooltipElement ) {
+			return tooltipElement;
+		}
+
+		tooltipElement = document.createElement( 'div' );
+		tooltipElement.className = 'cbb-zencoin-tooltip';
+		tooltipElement.setAttribute( 'role', 'tooltip' );
+		document.body.appendChild( tooltipElement );
+
+		return tooltipElement;
+	}
+
+	function positionTooltip( coin, tooltipBox ) {
+		var coinRect = coin.getBoundingClientRect();
+		var tooltipRect = tooltipBox.getBoundingClientRect();
+		var viewportPadding = 16;
+		var left = coinRect.left + ( coinRect.width / 2 ) - ( tooltipRect.width / 2 );
+		var top = coinRect.bottom + 16;
+
+		left = Math.max( viewportPadding, Math.min( left, window.innerWidth - tooltipRect.width - viewportPadding ) );
+
+		if ( top + tooltipRect.height + viewportPadding > window.innerHeight ) {
+			top = Math.max( viewportPadding, coinRect.top - tooltipRect.height - 16 );
+			tooltipBox.classList.add( 'is-above' );
+		} else {
+			tooltipBox.classList.remove( 'is-above' );
+		}
+
+		tooltipBox.style.left = left + 'px';
+		tooltipBox.style.top = top + 'px';
+		tooltipBox.style.setProperty( '--cbb-zencoin-tooltip-arrow-left', ( coinRect.left + ( coinRect.width / 2 ) - left ) + 'px' );
+	}
+
+	function showTooltip( coin ) {
+		var text = coin.getAttribute( 'data-zencoin-tooltip' );
+		var tooltipBox;
+
+		if ( ! text ) {
+			return;
+		}
+
+		tooltipBox = getTooltipElement();
+		activeTooltipCoin = coin;
+		tooltipBox.textContent = text;
+		tooltipBox.classList.add( 'is-active' );
+		positionTooltip( coin, tooltipBox );
+	}
+
+	function hideTooltip( coin ) {
+		if ( coin && activeTooltipCoin && coin !== activeTooltipCoin ) {
+			return;
+		}
+
+		if ( tooltipElement ) {
+			tooltipElement.classList.remove( 'is-active' );
+		}
+
+		activeTooltipCoin = null;
+	}
+
+	function bindTooltipEvents() {
+		document.addEventListener( 'mouseover', function ( event ) {
+			var coin = event.target.closest && event.target.closest( '.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""])' );
+
+			if ( coin ) {
+				showTooltip( coin );
+			}
+		} );
+
+		document.addEventListener( 'mouseout', function ( event ) {
+			var coin = event.target.closest && event.target.closest( '.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""])' );
+
+			if ( coin && ! coin.contains( event.relatedTarget ) ) {
+				hideTooltip( coin );
+			}
+		} );
+
+		document.addEventListener( 'focusin', function ( event ) {
+			var coin = event.target.closest && event.target.closest( '.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""])' );
+
+			if ( coin ) {
+				showTooltip( coin );
+			}
+		} );
+
+		document.addEventListener( 'focusout', function ( event ) {
+			var coin = event.target.closest && event.target.closest( '.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""])' );
+
+			if ( coin ) {
+				hideTooltip( coin );
+			}
+		} );
+
+		window.addEventListener( 'scroll', function () {
+			if ( activeTooltipCoin && tooltipElement && tooltipElement.classList.contains( 'is-active' ) ) {
+				positionTooltip( activeTooltipCoin, tooltipElement );
+			}
+		}, true );
+
+		window.addEventListener( 'resize', function () {
+			if ( activeTooltipCoin && tooltipElement && tooltipElement.classList.contains( 'is-active' ) ) {
+				positionTooltip( activeTooltipCoin, tooltipElement );
+			}
+		} );
+	}
+
 	if ( 'loading' === document.readyState ) {
 		document.addEventListener( 'DOMContentLoaded', function () {
 			scan( document );
 			startObserver();
+			bindTooltipEvents();
 		} );
 	} else {
 		scan( document );
 		startObserver();
+		bindTooltipEvents();
 	}
 }() );

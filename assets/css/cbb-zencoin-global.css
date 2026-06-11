@@ -141,61 +141,52 @@
 	cursor: help;
 }
 
-.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""])::after {
+.cbb-zencoin-tooltip {
+	--zen-coin-tooltip-bg: #d8b354;
+	--zen-coin-tooltip-border: #9a9a9a;
+	--zen-coin-tooltip-ink: #3f3d3d;
 	background: var(--zen-coin-tooltip-bg);
 	border: 2px solid var(--zen-coin-tooltip-border);
 	border-radius: 7px;
 	box-shadow: none;
 	color: var(--zen-coin-tooltip-ink);
-	content: attr(data-zencoin-tooltip);
 	font-size: 18px;
 	font-weight: 500;
-	left: 50%;
 	line-height: 1.38;
-	max-width: min(290px, calc(100vw - 32px));
+	max-width: calc(100vw - 32px);
 	opacity: 0;
 	padding: 12px 14px;
 	pointer-events: none;
-	position: absolute;
+	position: fixed;
 	text-align: left;
-	top: calc(100% + 16px);
-	transform: translate(-50%, -4px);
+	transform: translateY(-4px);
 	transition: opacity 160ms ease, transform 160ms ease;
 	visibility: hidden;
 	white-space: normal;
 	width: 290px;
-	z-index: 999;
+	z-index: 2147483647;
 }
 
-.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""])::before {
+.cbb-zencoin-tooltip::before {
 	border: 6px solid transparent;
 	border-bottom-color: var(--zen-coin-tooltip-border);
 	content: "";
-	left: 50%;
-	opacity: 0;
+	left: var(--cbb-zencoin-tooltip-arrow-left, 50%);
 	pointer-events: none;
 	position: absolute;
+	top: -14px;
 	transform: translateX(-50%);
-	transition: opacity 160ms ease;
-	top: calc(100% + 5px);
-	visibility: hidden;
-	z-index: 1000;
 }
 
-.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""]):hover::after,
-.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""]):focus::after,
-.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""]):hover::before,
-.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""]):focus::before {
+.cbb-zencoin-tooltip.is-above::before {
+	border-bottom-color: transparent;
+	border-top-color: var(--zen-coin-tooltip-border);
+	bottom: -14px;
+	top: auto;
+}
+
+.cbb-zencoin-tooltip.is-active {
 	opacity: 1;
+	transform: translateY(0);
 	visibility: visible;
-}
-
-.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""]):hover::after,
-.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""]):focus::after {
-	transform: translate(-50%, 0);
-}
-
-.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""]):hover::before,
-.zen-coin-global[data-zencoin-tooltip]:not([data-zencoin-tooltip=""]):focus::before {
-	transform: translateX(-50%);
 }
