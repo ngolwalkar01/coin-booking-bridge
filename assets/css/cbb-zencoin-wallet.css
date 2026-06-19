@@ -23,7 +23,8 @@
 }
 
 .cbb-zencoin-wallet__profile {
-	display: grid;
+	/*display: grid;*/
+	display:none;
 	grid-template-columns: 64px minmax(0, 1fr);
 	gap: 18px;
 	align-items: center;
