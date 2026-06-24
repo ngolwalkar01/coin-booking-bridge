@@ -404,7 +404,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			?>
 			<div class="wrap">
 				<h1><?php esc_html_e( 'Zencoin Settings', 'coin-booking-bridge' ); ?></h1>
-				<p><?php esc_html_e( 'Central Zencoin rules used by future package, drop-in, membership, gift-card, and booking flows. These settings are saved now but not yet applied to the current MVP debit/credit behavior.', 'coin-booking-bridge' ); ?></p>
+				<p><?php esc_html_e( 'Central Zencoin rules for package, drop-in, membership, gift-card, and booking flows. Package and drop-in validity settings are used when expiring granted Zencoin buckets.', 'coin-booking-bridge' ); ?></p>
 
 				<?php self::render_system_status_panel(); ?>
 
@@ -1573,7 +1573,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				array(
 					'id'          => self::META_PRODUCT_TYPE,
 					'label'       => __( 'Zencoin product type', 'coin-booking-bridge' ),
-					'description' => __( 'Classifies non-booking products that will grant Zencoins in the bucket system. Saving only for now; grant behavior is wired in a later milestone.', 'coin-booking-bridge' ),
+					'description' => __( 'Classifies non-booking products that grant Zencoins when a paid order is processed.', 'coin-booking-bridge' ),
 					'desc_tip'    => true,
 					'options'     => self::get_zencoin_product_type_options(),
 				)
@@ -1583,7 +1583,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				array(
 					'id'                => self::META_ZC_GRANT_AMOUNT,
 					'label'             => __( 'Zencoins granted on paid order', 'coin-booking-bridge' ),
-					'description'       => __( 'Used for packages, drop-ins, free trials, gift cards, and top-ups once bucket grants are enabled.', 'coin-booking-bridge' ),
+					'description'       => __( 'For packages, drop-ins, and free drop-in trials, this amount is granted into an expiring Zencoin bucket after payment.', 'coin-booking-bridge' ),
 					'desc_tip'          => true,
 					'type'              => 'number',
 					'custom_attributes' => array(
@@ -1597,7 +1597,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				array(
 					'id'                => self::META_VALIDITY_DAYS,
 					'label'             => __( 'Zencoin validity days', 'coin-booking-bridge' ),
-					'description'       => __( 'Leave empty to use the central default for the selected product type.', 'coin-booking-bridge' ),
+					'description'       => __( 'Limits how long granted Zencoins remain available after purchase. Leave empty to use the central default for the selected product type.', 'coin-booking-bridge' ),
 					'desc_tip'          => true,
 					'type'              => 'number',
 					'custom_attributes' => array(
