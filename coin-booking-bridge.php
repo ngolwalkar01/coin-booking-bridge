@@ -29,6 +29,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		const META_PRODUCT_TYPE     = '_cbb_zencoin_product_type';
 		const META_ZC_GRANT_AMOUNT  = '_cbb_zencoin_grant_amount';
 		const META_VALIDITY_DAYS    = '_cbb_zencoin_validity_days';
+		const META_VALIDITY_MONTHS  = '_cbb_zencoin_validity_months';
 		const META_SOURCE_LABEL     = '_cbb_zencoin_source_label';
 		const META_ONE_TIME_PERSON  = '_cbb_zencoin_one_time_per_person';
 		const META_PACKAGE_SIZE     = '_cbb_zencoin_package_size';
@@ -303,11 +304,11 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				'workshop_tier_b_cost'                 => '8',
 				'workshop_tier_c_cost'                 => '10',
 				'auto_calculate_booking_cost'          => 'yes',
-				'free_dropin_validity_days'            => '30',
-				'dropin_validity_days'                 => '90',
-				'package_small_validity_days'          => '90',
-				'package_medium_validity_days'         => '90',
-				'package_large_validity_days'          => '180',
+				'free_dropin_validity_months'          => '1',
+				'dropin_validity_months'               => '3',
+				'package_small_validity_months'        => '3',
+				'package_medium_validity_months'       => '3',
+				'package_large_validity_months'        => '6',
 				'gift_card_validity_days'              => '1095',
 				'newsletter_discount_validity_days'    => '30',
 				'on_time_cancel_cutoff_hours'          => '12',
@@ -325,8 +326,52 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		 */
 		private static function get_settings() {
 			$settings = get_option( self::OPTION_SETTINGS, array() );
+			$settings = is_array( $settings ) ? $settings : array();
+			$settings = self::migrate_legacy_validity_day_settings( $settings );
 
-			return wp_parse_args( is_array( $settings ) ? $settings : array(), self::get_default_settings() );
+			return wp_parse_args( $settings, self::get_default_settings() );
+		}
+
+		/**
+		 * Convert legacy day-based validity settings to month settings when needed.
+		 *
+		 * @param array $settings Raw saved settings.
+		 * @return array
+		 */
+		private static function migrate_legacy_validity_day_settings( array $settings ) {
+			$legacy_map = array(
+				'free_dropin_validity_months'    => 'free_dropin_validity_days',
+				'dropin_validity_months'         => 'dropin_validity_days',
+				'package_small_validity_months'  => 'package_small_validity_days',
+				'package_medium_validity_months' => 'package_medium_validity_days',
+				'package_large_validity_months'  => 'package_large_validity_days',
+			);
+
+			foreach ( $legacy_map as $month_key => $day_key ) {
+				if ( array_key_exists( $month_key, $settings ) || ! array_key_exists( $day_key, $settings ) ) {
+					continue;
+				}
+
+				$settings[ $month_key ] = self::convert_legacy_validity_days_to_months( $settings[ $day_key ] );
+			}
+
+			return $settings;
+		}
+
+		/**
+		 * Convert old fixed-day validity values to calendar-month settings.
+		 *
+		 * @param mixed $days Legacy day count.
+		 * @return int
+		 */
+		private static function convert_legacy_validity_days_to_months( $days ) {
+			$days = absint( $days );
+
+			if ( $days <= 0 ) {
+				return 0;
+			}
+
+			return max( 1, (int) round( $days / 30 ) );
 		}
 
 		/**
@@ -349,11 +394,11 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			);
 
 			$integer_fields = array(
-				'free_dropin_validity_days',
-				'dropin_validity_days',
-				'package_small_validity_days',
-				'package_medium_validity_days',
-				'package_large_validity_days',
+				'free_dropin_validity_months',
+				'dropin_validity_months',
+				'package_small_validity_months',
+				'package_medium_validity_months',
+				'package_large_validity_months',
 				'gift_card_validity_days',
 				'newsletter_discount_validity_days',
 				'on_time_cancel_cutoff_hours',
@@ -404,7 +449,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			?>
 			<div class="wrap">
 				<h1><?php esc_html_e( 'Zencoin Settings', 'coin-booking-bridge' ); ?></h1>
-				<p><?php esc_html_e( 'Central Zencoin rules for package, drop-in, membership, gift-card, and booking flows. Package and drop-in validity settings are used when expiring granted Zencoin buckets.', 'coin-booking-bridge' ); ?></p>
+				<p><?php esc_html_e( 'Central Zencoin rules for package, drop-in, membership, gift-card, and booking flows. Package and drop-in validity settings use calendar months when expiring granted Zencoin buckets.', 'coin-booking-bridge' ); ?></p>
 
 				<?php self::render_system_status_panel(); ?>
 
@@ -423,11 +468,11 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 
 					<h2><?php esc_html_e( 'Validity', 'coin-booking-bridge' ); ?></h2>
 					<table class="form-table" role="presentation">
-						<?php self::render_number_setting_row( 'free_dropin_validity_days', __( 'Free drop-in validity (days)', 'coin-booking-bridge' ), $settings, '1' ); ?>
-						<?php self::render_number_setting_row( 'dropin_validity_days', __( 'Drop-in validity (days)', 'coin-booking-bridge' ), $settings, '1' ); ?>
-						<?php self::render_number_setting_row( 'package_small_validity_days', __( 'Small package validity (days)', 'coin-booking-bridge' ), $settings, '1' ); ?>
-						<?php self::render_number_setting_row( 'package_medium_validity_days', __( 'Medium package validity (days)', 'coin-booking-bridge' ), $settings, '1' ); ?>
-						<?php self::render_number_setting_row( 'package_large_validity_days', __( 'Large package validity (days)', 'coin-booking-bridge' ), $settings, '1' ); ?>
+						<?php self::render_number_setting_row( 'free_dropin_validity_months', __( 'Free drop-in validity (months)', 'coin-booking-bridge' ), $settings, '1' ); ?>
+						<?php self::render_number_setting_row( 'dropin_validity_months', __( 'Drop-in validity (months)', 'coin-booking-bridge' ), $settings, '1' ); ?>
+						<?php self::render_number_setting_row( 'package_small_validity_months', __( 'Small package validity (months)', 'coin-booking-bridge' ), $settings, '1' ); ?>
+						<?php self::render_number_setting_row( 'package_medium_validity_months', __( 'Medium package validity (months)', 'coin-booking-bridge' ), $settings, '1' ); ?>
+						<?php self::render_number_setting_row( 'package_large_validity_months', __( 'Large package validity (months)', 'coin-booking-bridge' ), $settings, '1' ); ?>
 						<?php self::render_number_setting_row( 'gift_card_validity_days', __( 'Gift card validity (days)', 'coin-booking-bridge' ), $settings, '1' ); ?>
 						<?php self::render_number_setting_row( 'newsletter_discount_validity_days', __( 'Newsletter discount validity (days)', 'coin-booking-bridge' ), $settings, '1' ); ?>
 					</table>
@@ -1595,9 +1640,10 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 
 			woocommerce_wp_text_input(
 				array(
-					'id'                => self::META_VALIDITY_DAYS,
-					'label'             => __( 'Zencoin validity days', 'coin-booking-bridge' ),
-					'description'       => __( 'Limits how long granted Zencoins remain available after purchase. Leave empty to use the central default for the selected product type.', 'coin-booking-bridge' ),
+					'id'                => self::META_VALIDITY_MONTHS,
+					'value'             => self::get_product_validity_months_field_value( get_the_ID() ),
+					'label'             => __( 'Zencoin validity months', 'coin-booking-bridge' ),
+					'description'       => __( 'Limits how many calendar months granted Zencoins remain available after purchase. Leave empty to use the central default for the selected product type.', 'coin-booking-bridge' ),
 					'desc_tip'          => true,
 					'type'              => 'number',
 					'custom_attributes' => array(
@@ -1702,7 +1748,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			$policy       = isset( $_POST[ self::META_REFUND_POLICY ] ) ? sanitize_key( wp_unslash( $_POST[ self::META_REFUND_POLICY ] ) ) : 'full'; // phpcs:ignore WordPress.Security.NonceVerification.Missing
 			$product_type = isset( $_POST[ self::META_PRODUCT_TYPE ] ) ? sanitize_key( wp_unslash( $_POST[ self::META_PRODUCT_TYPE ] ) ) : 'none'; // phpcs:ignore WordPress.Security.NonceVerification.Missing
 			$zc_amount    = isset( $_POST[ self::META_ZC_GRANT_AMOUNT ] ) ? self::sanitize_decimal_setting( wp_unslash( $_POST[ self::META_ZC_GRANT_AMOUNT ] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
-			$validity     = isset( $_POST[ self::META_VALIDITY_DAYS ] ) && '' !== $_POST[ self::META_VALIDITY_DAYS ] ? absint( wp_unslash( $_POST[ self::META_VALIDITY_DAYS ] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+			$validity     = isset( $_POST[ self::META_VALIDITY_MONTHS ] ) && '' !== $_POST[ self::META_VALIDITY_MONTHS ] ? absint( wp_unslash( $_POST[ self::META_VALIDITY_MONTHS ] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
 			$label        = isset( $_POST[ self::META_SOURCE_LABEL ] ) ? sanitize_text_field( wp_unslash( $_POST[ self::META_SOURCE_LABEL ] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
 			$package_size = isset( $_POST[ self::META_PACKAGE_SIZE ] ) ? sanitize_key( wp_unslash( $_POST[ self::META_PACKAGE_SIZE ] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
 			$one_time     = isset( $_POST[ self::META_ONE_TIME_PERSON ] ) ? 'yes' : 'no'; // phpcs:ignore WordPress.Security.NonceVerification.Missing
@@ -1712,7 +1758,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			update_post_meta( $post_id, self::META_REFUND_POLICY, in_array( $policy, array( 'full', 'none' ), true ) ? $policy : 'full' );
 			update_post_meta( $post_id, self::META_PRODUCT_TYPE, array_key_exists( $product_type, self::get_zencoin_product_type_options() ) ? $product_type : 'none' );
 			update_post_meta( $post_id, self::META_ZC_GRANT_AMOUNT, $zc_amount );
-			update_post_meta( $post_id, self::META_VALIDITY_DAYS, $validity );
+			update_post_meta( $post_id, self::META_VALIDITY_MONTHS, $validity );
 			update_post_meta( $post_id, self::META_SOURCE_LABEL, $label );
 			update_post_meta( $post_id, self::META_PACKAGE_SIZE, in_array( $package_size, array( '', 'small', 'medium', 'large' ), true ) ? $package_size : '' );
 			update_post_meta( $post_id, self::META_ONE_TIME_PERSON, $one_time );
@@ -1806,7 +1852,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 					$amount,
 					array(
 						'source_type'           => $grant['product_type'],
-						'expires_at'            => self::calculate_expiry_datetime( $grant['validity_days'], $order->get_date_paid() ),
+						'expires_at'            => self::calculate_expiry_datetime( $grant['validity_months'], $order->get_date_paid() ),
 						'related_order_id'      => $order->get_id(),
 						'related_order_item_id' => $item_id,
 						'related_product_id'    => $grant['product_id'],
@@ -2126,66 +2172,74 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				'product_id'    => $product_id,
 				'product_type'  => $product_type,
 				'amount'        => $amount,
-				'validity_days' => self::get_product_grant_validity_days( $product_id, $product_type ),
+				'validity_months' => self::get_product_grant_validity_months( $product_id, $product_type ),
 				'source_label'  => $source_label,
 				'package_size'  => get_post_meta( $product_id, self::META_PACKAGE_SIZE, true ),
 			);
 		}
 
 		/**
-		 * Get validity days for a package/drop-in product grant.
+		 * Get validity months for a package/drop-in product grant.
 		 *
 		 * @param int    $product_id   Product ID.
 		 * @param string $product_type Product type.
 		 * @return int
 		 */
-		private static function get_product_grant_validity_days( $product_id, $product_type ) {
-			$override = get_post_meta( $product_id, self::META_VALIDITY_DAYS, true );
+		private static function get_product_grant_validity_months( $product_id, $product_type ) {
+			$override = get_post_meta( $product_id, self::META_VALIDITY_MONTHS, true );
 
 			if ( '' !== $override ) {
 				return absint( $override );
 			}
 
+			$legacy_days = get_post_meta( $product_id, self::META_VALIDITY_DAYS, true );
+
+			if ( '' !== $legacy_days ) {
+				return self::convert_legacy_validity_days_to_months( $legacy_days );
+			}
+
 			$settings = self::get_settings();
 
 			if ( 'drop_in' === $product_type ) {
-				return absint( $settings['dropin_validity_days'] );
+				return absint( $settings['dropin_validity_months'] );
 			}
 
 			if ( 'free_drop_in' === $product_type ) {
-				return absint( $settings['free_dropin_validity_days'] );
+				return absint( $settings['free_dropin_validity_months'] );
 			}
 
 			$package_size = get_post_meta( $product_id, self::META_PACKAGE_SIZE, true );
 
 			if ( 'large' === $package_size ) {
-				return absint( $settings['package_large_validity_days'] );
+				return absint( $settings['package_large_validity_months'] );
 			}
 
 			if ( 'medium' === $package_size ) {
-				return absint( $settings['package_medium_validity_days'] );
+				return absint( $settings['package_medium_validity_months'] );
 			}
 
-			return absint( $settings['package_small_validity_days'] );
+			return absint( $settings['package_small_validity_months'] );
 		}
 
 		/**
-		 * Calculate expiry datetime from validity days.
+		 * Calculate expiry datetime from validity months.
 		 *
-		 * @param int                    $validity_days Validity days.
+		 * @param int                    $validity_months Validity months.
 		 * @param WC_DateTime|null|mixed $base_date     Base date.
 		 * @return string|null
 		 */
-		private static function calculate_expiry_datetime( $validity_days, $base_date = null ) {
-			$validity_days = absint( $validity_days );
+		private static function calculate_expiry_datetime( $validity_months, $base_date = null ) {
+			$validity_months = absint( $validity_months );
 
-			if ( $validity_days <= 0 ) {
+			if ( $validity_months <= 0 ) {
 				return null;
 			}
 
 			$timestamp = $base_date instanceof WC_DateTime ? $base_date->getTimestamp() : current_time( 'timestamp' );
+			$date      = new DateTimeImmutable( '@' . $timestamp );
+			$date      = $date->modify( '+' . $validity_months . ' months' );
 
-			return gmdate( 'Y-m-d H:i:s', $timestamp + ( DAY_IN_SECONDS * $validity_days ) );
+			return $date->format( 'Y-m-d H:i:s' );
 		}
 
 		/**
@@ -2753,6 +2807,51 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		}
 
 		/**
+		 * Get the booking product label to show in wallet activity.
+		 *
+		 * @param WC_Order $order Order.
+		 * @return string
+		 */
+		private static function get_order_booking_product_label( $order ) {
+			if ( ! $order instanceof WC_Order ) {
+				return '';
+			}
+
+			$labels = array();
+
+			foreach ( $order->get_items( 'line_item' ) as $item ) {
+				$item_coin_cost = (float) $item->get_meta( self::META_COIN_ITEM_COST, true );
+
+				if ( $item_coin_cost <= 0 ) {
+					$product_id     = self::get_item_product_or_parent_id( $item );
+					$product_cost   = $product_id ? (float) get_post_meta( $product_id, self::META_BOOKING_COST, true ) : 0.0;
+					$item_coin_cost = $product_cost * max( 1, (float) $item->get_quantity() );
+				}
+
+				if ( $item_coin_cost <= 0 ) {
+					continue;
+				}
+
+				$label = $item->get_name();
+
+				if ( '' === $label && method_exists( $item, 'get_product' ) ) {
+					$product = $item->get_product();
+					$label   = $product ? $product->get_name() : '';
+				}
+
+				$label = html_entity_decode( wp_strip_all_tags( (string) $label ), ENT_QUOTES, get_bloginfo( 'charset' ) );
+
+				if ( '' !== $label ) {
+					$labels[] = $label;
+				}
+			}
+
+			$labels = array_values( array_unique( $labels ) );
+
+			return (string) apply_filters( 'cbb_order_booking_product_label', implode( ', ', $labels ), $order, $labels );
+		}
+
+		/**
 		 * Debit booking coins after checkout order creation.
 		 *
 		 * @param int      $order_id    Order ID.
@@ -2790,8 +2889,9 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				return;
 			}
 
-			$details     = sprintf( __( 'Coins used for booking order #%s', 'coin-booking-bridge' ), $order->get_order_number() );
-			$consumption = false;
+			$booking_label = self::get_order_booking_product_label( $order );
+			$details       = '' !== $booking_label ? $booking_label : sprintf( __( 'Booking order #%s', 'coin-booking-bridge' ), $order->get_order_number() );
+			$consumption   = false;
 
 			if ( self::get_zencoin_bucket_balance( $user_id ) + 0.000001 >= $coins ) {
 				$consumption = self::debit_zencoin_buckets(
@@ -2799,14 +2899,11 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 					$coins,
 					array(
 						'entry_type'       => 'booking_charge',
-						'label'            => sprintf(
-							/* translators: %s: order number */
-							__( 'Booking order #%s', 'coin-booking-bridge' ),
-							$order->get_order_number()
-						),
+						'label'            => $details,
 						'related_order_id' => $order->get_id(),
 						'metadata'         => array(
 							'order_number' => $order->get_order_number(),
+							'product_name'  => $booking_label,
 						),
 					)
 				);
