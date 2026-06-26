@@ -143,7 +143,7 @@
 
 .cbb-zencoin-wallet__activity h2 {
 	margin: 0 0 14px;
-	font-size: 28px;
+	font-size: 14px;
 	font-weight: 400;
 	line-height: 1.35;
 }
@@ -270,7 +270,7 @@
 	}
 
 	.cbb-zencoin-wallet__activity h2 {
-		font-size: 21px;
+		font-size: 14px;
 	}
 
 	.cbb-zencoin-wallet__redeem,
