@@ -1690,6 +1690,27 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		}
 
 		/**
+		 * Get the month value shown in the product validity field.
+		 *
+		 * @param int $product_id Product ID.
+		 * @return int|string
+		 */
+		private static function get_product_validity_months_field_value( $product_id ) {
+			$months = get_post_meta( $product_id, self::META_VALIDITY_MONTHS, true );
+
+			if ( '' !== $months ) {
+				return absint( $months );
+			}
+
+			$legacy_days = get_post_meta( $product_id, self::META_VALIDITY_DAYS, true );
+
+			if ( '' !== $legacy_days ) {
+				return self::convert_legacy_validity_days_to_months( $legacy_days );
+			}
+
+			return '';
+		}
+		/**
 		 * Get Zencoin product type options.
 		 *
 		 * @return array
