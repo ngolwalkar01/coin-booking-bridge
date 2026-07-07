@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Coin Booking Bridge
  * Description: MVP bridge for WooCommerce Memberships, Subscriptions, Bookings, and Tera Wallet coin-based bookings.
- * Version: 0.2.24
+ * Version: 0.2.25
  * Author: Custom
  * Text Domain: coin-booking-bridge
  *
@@ -14,7 +14,7 @@ defined( 'ABSPATH' ) || exit;
 if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 	final class CBB_Coin_Booking_Bridge {
 
-		const VERSION           = '0.2.24';
+		const VERSION           = '0.2.25';
 		const DB_VERSION        = '2026050801';
 		const OPTION_DB_VERSION = 'cbb_db_version';
 		const OPTION_SETTINGS   = 'cbb_zencoin_settings';
@@ -124,7 +124,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			add_filter( 'woocommerce_order_needs_payment', array( __CLASS__, 'force_free_dropin_order_payment' ), 20, 2 );
 			add_filter( 'woocommerce_available_payment_gateways', array( __CLASS__, 'limit_free_dropin_to_woopayments' ), 100 );
 
-			add_filter( 'woocommerce_add_to_cart_validation', array( __CLASS__, 'validate_single_booking_add_to_cart' ), 20, 6 );
+			add_filter( 'woocommerce_add_to_cart_validation', array( __CLASS__, 'validate_single_booking_add_to_cart' ), 1, 6 );
 			add_filter( 'woocommerce_add_cart_item', array( __CLASS__, 'zero_coin_booking_cart_item_price' ), 999, 1 );
 			add_filter( 'woocommerce_get_cart_item_from_session', array( __CLASS__, 'zero_coin_booking_session_item_price' ), 999, 3 );
 			add_action( 'woocommerce_before_calculate_totals', array( __CLASS__, 'zero_coin_booking_prices' ), 999 );
@@ -2951,7 +2951,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		 * @return bool
 		 */
 		public static function validate_single_booking_add_to_cart( $passed, $product_id, $quantity = 1, $variation_id = 0 ) {
-			if ( ! $passed || ! self::is_coin_booking_product( $product_id, $variation_id ) ) {
+			if ( ! self::is_coin_booking_product( $product_id, $variation_id ) ) {
 				return $passed;
 			}
 
