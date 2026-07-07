@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Coin Booking Bridge
  * Description: MVP bridge for WooCommerce Memberships, Subscriptions, Bookings, and Tera Wallet coin-based bookings.
- * Version: 0.2.21
+ * Version: 0.2.22
  * Author: Custom
  * Text Domain: coin-booking-bridge
  *
@@ -14,7 +14,7 @@ defined( 'ABSPATH' ) || exit;
 if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 	final class CBB_Coin_Booking_Bridge {
 
-		const VERSION           = '0.2.21';
+		const VERSION           = '0.2.22';
 		const DB_VERSION        = '2026050801';
 		const OPTION_DB_VERSION = 'cbb_db_version';
 		const OPTION_SETTINGS   = 'cbb_zencoin_settings';
@@ -39,6 +39,8 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		const META_TRIAL_IDENTITY   = '_cbb_free_trial_identity';
 		const META_TRIAL_EMAIL_HASH = '_cbb_free_trial_email_hash';
 		const META_TRIAL_PHONE_HASH = '_cbb_free_trial_phone_hash';
+		const META_TRIAL_CARD_HASH   = '_cbb_free_trial_card_fingerprint_hash';
+		const META_TRIAL_CARD_STATUS = '_cbb_free_trial_card_validation';
 		const META_DEBIT_TXN        = '_cbb_coins_debited_transaction_id';
 		const META_REFUND_TXN       = '_cbb_coins_refunded_transaction_id';
 		const META_COIN_TOTAL       = '_cbb_coin_total';
@@ -115,7 +117,12 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			add_action( 'woocommerce_order_status_processing', array( __CLASS__, 'grant_order_product_zencoins' ), 20, 1 );
 			add_action( 'woocommerce_order_status_completed', array( __CLASS__, 'grant_order_product_zencoins' ), 20, 1 );
 			add_action( 'woocommerce_checkout_process', array( __CLASS__, 'validate_free_dropin_trial_checkout' ), 20 );
+			add_action( 'woocommerce_checkout_order_processed', array( __CLASS__, 'prepare_free_dropin_classic_wcpay_payment' ), 5, 3 );
 			add_action( 'woocommerce_store_api_checkout_update_order_from_request', array( __CLASS__, 'validate_free_dropin_trial_store_api_checkout' ), 20, 2 );
+			add_action( 'woocommerce_rest_checkout_process_payment_with_context', array( __CLASS__, 'prepare_free_dropin_wcpay_payment' ), 20, 2 );
+			add_filter( 'woocommerce_cart_needs_payment', array( __CLASS__, 'force_free_dropin_cart_payment' ), 20, 2 );
+			add_filter( 'woocommerce_order_needs_payment', array( __CLASS__, 'force_free_dropin_order_payment' ), 20, 2 );
+			add_filter( 'woocommerce_available_payment_gateways', array( __CLASS__, 'limit_free_dropin_to_woopayments' ), 100 );
 
 			add_filter( 'woocommerce_add_cart_item', array( __CLASS__, 'zero_coin_booking_cart_item_price' ), 999, 1 );
 			add_filter( 'woocommerce_get_cart_item_from_session', array( __CLASS__, 'zero_coin_booking_session_item_price' ), 999, 3 );
@@ -1710,6 +1717,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 
 			return '';
 		}
+
 		/**
 		 * Get Zencoin product type options.
 		 *
@@ -1848,6 +1856,10 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				return;
 			}
 
+			if ( self::order_contains_free_dropin_trial( $order ) && ! self::validate_free_trial_card_for_order( $order ) ) {
+				return;
+			}
+
 			$grants = array();
 
 			foreach ( $order->get_items( 'line_item' ) as $item_id => $item ) {
@@ -1950,10 +1962,116 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		}
 
 		/**
+		 * Force a payment step for a zero-price free drop-in cart.
+		 *
+		 * @param bool    $needs_payment Whether the cart needs payment.
+		 * @param WC_Cart $cart          Cart object.
+		 * @return bool
+		 */
+		public static function force_free_dropin_cart_payment( $needs_payment, $cart = null ) {
+			return self::cart_contains_free_dropin_trial( $cart ) ? true : $needs_payment;
+		}
+
+		/**
+		 * Force unpaid free drop-in orders through the payment gateway.
+		 *
+		 * @param bool     $needs_payment Whether the order needs payment.
+		 * @param WC_Order $order         Order object.
+		 * @return bool
+		 */
+		public static function force_free_dropin_order_payment( $needs_payment, $order ) {
+			if ( $order instanceof WC_Order && ! $order->is_paid() && self::order_contains_free_dropin_trial( $order ) ) {
+				return true;
+			}
+
+			return $needs_payment;
+		}
+
+		/**
+		 * Only WooPayments may verify and save the card for a free drop-in.
+		 *
+		 * @param array $gateways Available gateways.
+		 * @return array
+		 */
+		public static function limit_free_dropin_to_woopayments( $gateways ) {
+			if ( ! self::cart_contains_free_dropin_trial() ) {
+				return $gateways;
+			}
+
+			return isset( $gateways['woocommerce_payments'] )
+				? array( 'woocommerce_payments' => $gateways['woocommerce_payments'] )
+				: array();
+		}
+
+		/**
+		 * Force card saving before classic checkout invokes WooPayments.
+		 *
+		 * @param int      $order_id   Order ID.
+		 * @param array    $posted_data Checkout data.
+		 * @param WC_Order $order       Order object.
+		 * @throws Exception When the card is not eligible.
+		 */
+		public static function prepare_free_dropin_classic_wcpay_payment( $order_id, $posted_data, $order ) {
+			if ( ! $order instanceof WC_Order || ! self::order_contains_free_dropin_trial( $order ) ) {
+				return;
+			}
+
+			$_POST['wc-woocommerce_payments-new-payment-method'] = 'true'; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+			$payment_method_id = isset( $_POST['wcpay-payment-method'] ) ? sanitize_text_field( wp_unslash( $_POST['wcpay-payment-method'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+
+			if ( preg_match( '/^pm_[A-Za-z0-9_]+$/', $payment_method_id ) ) {
+				$card_hash = self::validate_free_trial_card_payment_method( $payment_method_id, $order->get_id() );
+				$order->update_meta_data( self::META_TRIAL_CARD_HASH, $card_hash );
+				$order->update_meta_data( self::META_TRIAL_CARD_STATUS, 'passed' );
+				$order->save_meta_data();
+			}
+		}
+		/**
+		 * Force WooPayments to use a SetupIntent and save the card for the free trial.
+		 *
+		 * @param object $context Store API payment context.
+		 * @param object $result  Store API payment result.
+		 * @throws Exception When the payment method or card is not eligible.
+		 */
+		public static function prepare_free_dropin_wcpay_payment( $context, $result ) {
+			$order = isset( $context->order ) ? $context->order : null;
+
+			if ( ! $order instanceof WC_Order || ! self::order_contains_free_dropin_trial( $order ) ) {
+				return;
+			}
+
+			if ( (int) $order->get_customer_id() <= 0 ) {
+				throw new Exception( esc_html__( 'Please sign in before claiming the free drop-in trial so the verified card can be saved to your account.', 'coin-booking-bridge' ) );
+			}
+
+			if ( 'woocommerce_payments' !== (string) $context->payment_method ) {
+				throw new Exception( esc_html__( 'Please use WooPayments card entry to claim the free drop-in trial.', 'coin-booking-bridge' ) );
+			}
+
+			$payment_data = is_array( $context->payment_data ) ? $context->payment_data : array();
+			$payment_data['wc-woocommerce_payments-new-payment-method'] = 'true';
+			$context->set_payment_data( $payment_data );
+
+			$payment_method_id = isset( $payment_data['wcpay-payment-method'] ) ? sanitize_text_field( $payment_data['wcpay-payment-method'] ) : '';
+
+			if ( preg_match( '/^pm_[A-Za-z0-9_]+$/', $payment_method_id ) ) {
+				$card_hash = self::validate_free_trial_card_payment_method( $payment_method_id, $order->get_id() );
+				$order->update_meta_data( self::META_TRIAL_CARD_HASH, $card_hash );
+				$order->update_meta_data( self::META_TRIAL_CARD_STATUS, 'passed' );
+				$order->save_meta_data();
+			}
+		}
+
+		/**
 		 * Validate free drop-in trial eligibility during classic checkout.
 		 */
 		public static function validate_free_dropin_trial_checkout() {
 			if ( ! WC()->cart || WC()->cart->is_empty() || ! self::cart_contains_free_dropin_trial() ) {
+				return;
+			}
+
+			if ( ! is_user_logged_in() ) {
+				wc_add_notice( __( 'Please sign in before claiming the free drop-in trial so the verified card can be saved to your account.', 'coin-booking-bridge' ), 'error' );
 				return;
 			}
 
@@ -1967,6 +2085,24 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 
 			if ( self::free_trial_identity_has_been_used( $email, $phone ) ) {
 				wc_add_notice( __( 'This free drop-in trial has already been used for this email or phone number.', 'coin-booking-bridge' ), 'error' );
+				return;
+			}
+
+			$gateway = isset( $_POST['payment_method'] ) ? sanitize_key( wp_unslash( $_POST['payment_method'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+
+			if ( 'woocommerce_payments' !== $gateway ) {
+				wc_add_notice( __( 'Please use WooPayments card entry to claim the free drop-in trial.', 'coin-booking-bridge' ), 'error' );
+				return;
+			}
+
+			$payment_method_id = isset( $_POST['wcpay-payment-method'] ) ? sanitize_text_field( wp_unslash( $_POST['wcpay-payment-method'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+
+			if ( preg_match( '/^pm_[A-Za-z0-9_]+$/', $payment_method_id ) ) {
+				try {
+					self::validate_free_trial_card_payment_method( $payment_method_id );
+				} catch ( Exception $exception ) {
+					wc_add_notice( $exception->getMessage(), 'error' );
+				}
 			}
 		}
 
@@ -1981,8 +2117,12 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				return;
 			}
 
-			$email = $order instanceof WC_Order ? $order->get_billing_email() : '';
-			$phone = $order instanceof WC_Order ? $order->get_billing_phone() : '';
+			if ( ! $order instanceof WC_Order || (int) $order->get_customer_id() <= 0 ) {
+				throw new Exception( esc_html__( 'Please sign in before claiming the free drop-in trial so the verified card can be saved to your account.', 'coin-booking-bridge' ) );
+			}
+
+			$email = $order->get_billing_email();
+			$phone = $order->get_billing_phone();
 
 			if ( ! self::has_free_trial_identity( $email, $phone ) ) {
 				throw new Exception( esc_html__( 'Please provide both email and phone number to claim the free drop-in trial.', 'coin-booking-bridge' ) );
@@ -1996,10 +2136,17 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		/**
 		 * Check whether cart contains a free drop-in trial product.
 		 *
+		 * @param WC_Cart|null $cart Optional cart object.
 		 * @return bool
 		 */
-		private static function cart_contains_free_dropin_trial() {
-			foreach ( WC()->cart->get_cart() as $cart_item ) {
+		private static function cart_contains_free_dropin_trial( $cart = null ) {
+			$cart = $cart instanceof WC_Cart ? $cart : ( WC()->cart ? WC()->cart : null );
+
+			if ( ! $cart ) {
+				return false;
+			}
+
+			foreach ( $cart->get_cart() as $cart_item ) {
 				$product_id = ! empty( $cart_item['product_id'] ) ? (int) $cart_item['product_id'] : 0;
 
 				if ( $product_id && 'free_drop_in' === get_post_meta( $product_id, self::META_PRODUCT_TYPE, true ) ) {
@@ -2010,6 +2157,147 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			return false;
 		}
 
+		/**
+		 * Check whether an order contains a free drop-in trial product.
+		 *
+		 * @param WC_Order $order Order object.
+		 * @return bool
+		 */
+		private static function order_contains_free_dropin_trial( $order ) {
+			if ( ! $order instanceof WC_Order ) {
+				return false;
+			}
+
+			foreach ( $order->get_items( 'line_item' ) as $item ) {
+				$product_id = self::get_item_product_or_parent_id( $item );
+
+				if ( $product_id && 'free_drop_in' === get_post_meta( $product_id, self::META_PRODUCT_TYPE, true ) ) {
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		/**
+		 * Validate a WooPayments card and return its private fingerprint hash.
+		 *
+		 * @param string $payment_method_id WooPayments payment method ID.
+		 * @param int    $exclude_order_id  Optional current order ID.
+		 * @return string
+		 * @throws Exception When the card cannot be verified or was already used.
+		 */
+		private static function validate_free_trial_card_payment_method( $payment_method_id, $exclude_order_id = 0 ) {
+			if ( ! class_exists( 'WC_Payments' ) || ! is_callable( array( 'WC_Payments', 'get_payments_api_client' ) ) ) {
+				throw new Exception( esc_html__( 'WooPayments card verification is unavailable. Please try again later.', 'coin-booking-bridge' ) );
+			}
+
+			try {
+				$payment_method = WC_Payments::get_payments_api_client()->get_payment_method( $payment_method_id );
+			} catch ( Exception $exception ) {
+				throw new Exception( esc_html__( 'We could not verify this card. Please check the card details and try again.', 'coin-booking-bridge' ) );
+			}
+
+			$is_direct_card = is_array( $payment_method )
+				&& isset( $payment_method['type'], $payment_method['card']['fingerprint'] )
+				&& 'card' === $payment_method['type']
+				&& empty( $payment_method['card']['wallet'] );
+			$fingerprint    = $is_direct_card ? sanitize_text_field( $payment_method['card']['fingerprint'] ) : '';
+
+			if ( '' === $fingerprint ) {
+				throw new Exception( esc_html__( 'A verified card is required to claim the free drop-in trial.', 'coin-booking-bridge' ) );
+			}
+
+			$card_hash = wp_hash( 'wcpay-card:' . $fingerprint );
+
+			if ( self::free_trial_card_has_been_used( $card_hash, $exclude_order_id ) ) {
+				throw new Exception( esc_html__( 'This card has already been used for a free drop-in trial.', 'coin-booking-bridge' ) );
+			}
+
+			return $card_hash;
+		}
+
+		/**
+		 * Check whether a hashed card fingerprint was used by a successful trial order.
+		 *
+		 * @param string $card_hash        Hashed card fingerprint.
+		 * @param int    $exclude_order_id Optional current order ID.
+		 * @return bool
+		 */
+		private static function free_trial_card_has_been_used( $card_hash, $exclude_order_id = 0 ) {
+			if ( '' === $card_hash ) {
+				return false;
+			}
+
+			$orders = wc_get_orders(
+				array(
+					'limit'      => 1,
+					'return'     => 'ids',
+					'status'     => array( 'wc-processing', 'wc-completed' ),
+					'meta_key'   => self::META_TRIAL_CARD_HASH, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+					'meta_value' => $card_hash, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+					'exclude'    => $exclude_order_id ? array( absint( $exclude_order_id ) ) : array(),
+				)
+			);
+
+			return ! empty( $orders );
+		}
+
+		/**
+		 * Verify the order card before any free Zencoins are granted.
+		 *
+		 * @param WC_Order $order Order object.
+		 * @return bool
+		 */
+		private static function validate_free_trial_card_for_order( $order ) {
+			if ( ! $order instanceof WC_Order || ! self::order_contains_free_dropin_trial( $order ) ) {
+				return true;
+			}
+
+			$card_hash = (string) $order->get_meta( self::META_TRIAL_CARD_HASH, true );
+
+			if ( $card_hash && 'passed' === $order->get_meta( self::META_TRIAL_CARD_STATUS, true ) ) {
+				if ( ! self::free_trial_card_has_been_used( $card_hash, $order->get_id() ) ) {
+					return true;
+				}
+
+				return self::fail_free_trial_card_validation( $order, __( 'This card has already been used for a free drop-in trial.', 'coin-booking-bridge' ), 'duplicate' );
+			}
+
+			$payment_method_id = sanitize_text_field( (string) $order->get_meta( '_payment_method_id', true ) );
+
+			try {
+				$card_hash = self::validate_free_trial_card_payment_method( $payment_method_id, $order->get_id() );
+			} catch ( Exception $exception ) {
+				return self::fail_free_trial_card_validation( $order, $exception->getMessage(), 'failed' );
+			}
+
+			$order->update_meta_data( self::META_TRIAL_CARD_HASH, $card_hash );
+			$order->update_meta_data( self::META_TRIAL_CARD_STATUS, 'passed' );
+			$order->save_meta_data();
+
+			return true;
+		}
+
+		/**
+		 * Fail a free trial order when its card cannot be approved.
+		 *
+		 * @param WC_Order $order   Order object.
+		 * @param string   $message Failure message.
+		 * @param string   $status  Internal validation status.
+		 * @return false
+		 */
+		private static function fail_free_trial_card_validation( $order, $message, $status ) {
+			$order->update_meta_data( self::META_TRIAL_CARD_STATUS, sanitize_key( $status ) );
+			$order->add_order_note( sprintf( __( 'Free drop-in card validation failed: %s', 'coin-booking-bridge' ), wp_strip_all_tags( $message ) ) );
+			$order->save();
+
+			if ( ! $order->has_status( 'failed' ) ) {
+				$order->update_status( 'failed' );
+			}
+
+			return false;
+		}
 		/**
 		 * Check whether order customer identity has already used free trial.
 		 *
@@ -2042,12 +2330,14 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 
 			$email_hash = self::hash_free_trial_email( $order->get_billing_email() );
 			$phone_hash = self::hash_free_trial_phone( $order->get_billing_phone() );
+			$card_hash  = (string) $order->get_meta( self::META_TRIAL_CARD_HASH, true );
 
 			$order->update_meta_data(
 				self::META_TRIAL_IDENTITY,
 				array(
 					'email_hash' => $email_hash,
 					'phone_hash' => $phone_hash,
+					'card_hash'  => $card_hash,
 					'product_id' => absint( $product_id ),
 				)
 			);

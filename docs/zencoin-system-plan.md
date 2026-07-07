@@ -310,11 +310,13 @@ Client drop-ins:
 - Drop-in: `5 ZC`, `EUR 25`, valid `3 months`.
 - Free Drop-in Trial: `5 ZC`, `EUR 0`, valid `1 month`, single use only.
 
-Free trial identity MVP:
+Free trial identity:
 
-- Enforce by normalized email and phone for now.
-- User account ID may also be stored for reporting, but eligibility should not rely only on account ID.
-- Longer-term: add stronger duplicate detection using verified phone/payment identity.
+- Require a logged-in customer with normalized billing email and phone.
+- Require WooPayments card entry even though the order total is zero.
+- Use a WooPayments SetupIntent to verify and save the card without charging it.
+- Reject a repeat claim when the email, phone, or hashed card fingerprint matches a successful prior trial order.
+- Store only identity hashes on the order; raw card details and raw card fingerprints are not stored by CBB.
 
 ### Gift Cards
 
@@ -856,20 +858,22 @@ Not included yet:
 
 ### Milestone 1.2: Free Drop-In Trial Grants and Eligibility
 
-Status: implemented in plugin version `0.2.0`.
+Status: implemented and extended through plugin version `0.2.22`.
 
 Included:
 
 - Free drop-in trial products can create Zencoin buckets on paid/completed orders.
 - Free drop-in trial products create append-only ledger credit entries.
 - Free drop-in trial products can mirror credits to Tera Wallet when enabled.
-- Checkout requires both billing email and billing phone for free drop-in trial claims.
-- Repeat claims are blocked by normalized email hash or normalized phone hash.
-- Used identity hashes are stored on the successful order.
+- Checkout requires a logged-in customer with both billing email and billing phone.
+- A zero-total trial order is forced through WooPayments card verification via SetupIntent.
+- New cards are saved to the WooPayments customer account.
+- Repeat claims are blocked by normalized email hash, normalized phone hash, or hashed card fingerprint.
+- Used identity hashes are stored on the successful order; raw card fingerprints are never stored by CBB.
+- Zencoins are not granted unless card validation has passed.
 
 Not included yet:
 
-- Stronger identity checks beyond email and phone.
 - Gift card redemption.
 - Bucket-aware booking debit.
 
@@ -1219,7 +1223,7 @@ Consumer responsibilities:
 
 Answered:
 
-1. Free trial identity should be enforced by normalized email and phone for now.
+1. Free trial eligibility is enforced by normalized email, normalized phone, and a verified WooPayments card fingerprint.
 2. Woo Smart Coupons is not installed yet. It is only needed once gift-card work begins, unless gift cards move into an earlier milestone.
 3. Tera Wallet UI should be hidden in favor of a custom CBB wallet screen. CBB UI will own the customer-facing wallet experience.
 
