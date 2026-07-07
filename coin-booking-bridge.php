@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Coin Booking Bridge
  * Description: MVP bridge for WooCommerce Memberships, Subscriptions, Bookings, and Tera Wallet coin-based bookings.
- * Version: 0.2.23
+ * Version: 0.2.24
  * Author: Custom
  * Text Domain: coin-booking-bridge
  *
@@ -14,7 +14,7 @@ defined( 'ABSPATH' ) || exit;
 if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 	final class CBB_Coin_Booking_Bridge {
 
-		const VERSION           = '0.2.23';
+		const VERSION           = '0.2.24';
 		const DB_VERSION        = '2026050801';
 		const OPTION_DB_VERSION = 'cbb_db_version';
 		const OPTION_SETTINGS   = 'cbb_zencoin_settings';
@@ -124,6 +124,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			add_filter( 'woocommerce_order_needs_payment', array( __CLASS__, 'force_free_dropin_order_payment' ), 20, 2 );
 			add_filter( 'woocommerce_available_payment_gateways', array( __CLASS__, 'limit_free_dropin_to_woopayments' ), 100 );
 
+			add_filter( 'woocommerce_add_to_cart_validation', array( __CLASS__, 'validate_single_booking_add_to_cart' ), 20, 6 );
 			add_filter( 'woocommerce_add_cart_item', array( __CLASS__, 'zero_coin_booking_cart_item_price' ), 999, 1 );
 			add_filter( 'woocommerce_get_cart_item_from_session', array( __CLASS__, 'zero_coin_booking_session_item_price' ), 999, 3 );
 			add_action( 'woocommerce_before_calculate_totals', array( __CLASS__, 'zero_coin_booking_prices' ), 999 );
@@ -2941,6 +2942,28 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		}
 
 		/**
+		 * Prevent more than one coin-paid booking from being added to the cart.
+		 *
+		 * @param bool $passed       Whether add-to-cart should proceed.
+		 * @param int  $product_id   Product ID.
+		 * @param int  $quantity     Quantity being added.
+		 * @param int  $variation_id Variation ID.
+		 * @return bool
+		 */
+		public static function validate_single_booking_add_to_cart( $passed, $product_id, $quantity = 1, $variation_id = 0 ) {
+			if ( ! $passed || ! self::is_coin_booking_product( $product_id, $variation_id ) ) {
+				return $passed;
+			}
+
+			if ( max( 1, absint( $quantity ) ) > 1 || self::get_cart_coin_booking_count() > 0 ) {
+				wc_add_notice( __( 'Please book one class, workshop, event, or Fire & Ice session at a time.', 'coin-booking-bridge' ), 'error' );
+				return false;
+			}
+
+			return $passed;
+		}
+
+		/**
 		 * Set money price to zero for coin-paid booking cart items.
 		 *
 		 * @param WC_Cart $cart Cart.
@@ -4298,6 +4321,54 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			$quantity   = isset( $cart_item['quantity'] ) ? max( 1, (float) $cart_item['quantity'] ) : 1;
 
 			return (float) apply_filters( 'cbb_cart_item_coin_cost', $cost * $quantity, $cart_item );
+		}
+
+		/**
+		 * Check whether a product is a coin-paid booking product.
+		 *
+		 * @param int $product_id   Product ID.
+		 * @param int $variation_id Variation ID.
+		 * @return bool
+		 */
+		private static function is_coin_booking_product( $product_id, $variation_id = 0 ) {
+			$product_id   = absint( $product_id );
+			$variation_id = absint( $variation_id );
+			$lookup_id    = $variation_id > 0 ? $variation_id : $product_id;
+
+			if ( $lookup_id <= 0 ) {
+				return false;
+			}
+
+			$cost = (float) get_post_meta( $lookup_id, self::META_BOOKING_COST, true );
+			if ( $cost <= 0 && $variation_id > 0 ) {
+				$cost = (float) get_post_meta( $product_id, self::META_BOOKING_COST, true );
+			}
+
+			if ( $cost <= 0 ) {
+				return false;
+			}
+
+			$products = array( wc_get_product( $lookup_id ) );
+			if ( $variation_id > 0 ) {
+				$products[] = wc_get_product( $product_id );
+			}
+			$products = array_filter( $products );
+
+			foreach ( $products as $product ) {
+				if ( function_exists( 'is_wc_booking_product' ) && is_wc_booking_product( $product ) ) {
+					return true;
+				}
+
+				if ( method_exists( $product, 'is_type' ) && $product->is_type( 'booking' ) ) {
+					return true;
+				}
+
+				if ( is_a( $product, 'WC_Product_Booking' ) ) {
+					return true;
+				}
+			}
+
+			return false;
 		}
 
 		/**
