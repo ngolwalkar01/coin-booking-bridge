@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Coin Booking Bridge
  * Description: MVP bridge for WooCommerce Memberships, Subscriptions, Bookings, and Tera Wallet coin-based bookings.
- * Version: 0.2.22
+ * Version: 0.2.23
  * Author: Custom
  * Text Domain: coin-booking-bridge
  *
@@ -14,7 +14,7 @@ defined( 'ABSPATH' ) || exit;
 if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 	final class CBB_Coin_Booking_Bridge {
 
-		const VERSION           = '0.2.22';
+		const VERSION           = '0.2.23';
 		const DB_VERSION        = '2026050801';
 		const OPTION_DB_VERSION = 'cbb_db_version';
 		const OPTION_SETTINGS   = 'cbb_zencoin_settings';
@@ -3011,6 +3011,12 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				return;
 			}
 
+			$booking_count = self::get_cart_coin_booking_count();
+			if ( $booking_count > 1 ) {
+				self::add_validation_error( __( 'Please book one class, workshop, event, or Fire & Ice session at a time.', 'coin-booking-bridge' ), $errors );
+				return;
+			}
+
 			$required = self::get_cart_coin_total();
 			if ( $required <= 0 ) {
 				return;
@@ -3913,6 +3919,9 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		/**
 		 * Refund a bucket-aware booking order back to the original consumed buckets.
 		 *
+		 * If the original bucket has already expired, the refund becomes a new
+		 * purchased-credit bucket valid for three months from the refund date.
+		 *
 		 * @param WC_Order $order      Order object.
 		 * @param string   $label      Ledger label.
 		 * @param string   $entry_type Ledger entry type.
@@ -3970,6 +3979,72 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 					continue;
 				}
 
+				$related_booking_id = ! empty( $used['related_booking_id'] ) ? absint( $used['related_booking_id'] ) : null;
+				$is_expired         = $bucket->expires_at && $bucket->expires_at <= $now;
+
+				if ( $is_expired ) {
+					$refund_expires_at = self::calculate_expiry_datetime( 3 );
+					$refund_bucket_id = self::create_zencoin_bucket(
+						$user_id,
+						$amount,
+						array(
+							'source_type'           => 'purchased_credit',
+							'expires_at'            => $refund_expires_at,
+							'related_order_id'      => $order->get_id(),
+							'related_product_id'    => $bucket->related_product_id,
+							'related_booking_id'    => $related_booking_id,
+							'source_label'          => __( 'Purchased Credit Refund', 'coin-booking-bridge' ),
+							'metadata'              => array(
+								'original_bucket_id'         => $bucket_id,
+								'original_source_type'       => $bucket->source_type,
+								'original_bucket_expires_at' => $bucket->expires_at,
+								'refunded_at'                => $now,
+								'refund_reason'              => 'original_bucket_expired',
+							),
+						)
+					);
+
+					if ( ! $refund_bucket_id ) {
+						continue;
+					}
+
+					$ledger_id = self::add_zencoin_ledger_entry(
+						$user_id,
+						$amount,
+						array(
+							'bucket_id'          => $refund_bucket_id,
+							'entry_type'         => $entry_type,
+							'direction'          => 'credit',
+							'balance_after'      => self::get_zencoin_bucket_balance( $user_id ),
+							'label'              => $label,
+							'related_order_id'   => $order->get_id(),
+							'related_booking_id' => $related_booking_id,
+							'metadata'           => array(
+								'order_number'               => $order->get_order_number(),
+								'refunded_at'                => $now,
+								'expires_at'                 => $refund_expires_at,
+								'source_type'                => 'purchased_credit',
+								'original_bucket_id'         => $bucket_id,
+								'original_source_type'       => $bucket->source_type,
+								'original_bucket_expires_at' => $bucket->expires_at,
+							),
+						)
+					);
+
+					$refunds[] = array(
+						'bucket_id'          => $refund_bucket_id,
+						'original_bucket_id' => $bucket_id,
+						'ledger_id'          => $ledger_id,
+						'amount'             => self::format_zencoin_amount( $amount ),
+						'expires_at'         => $refund_expires_at,
+						'refund_bucket_type' => 'purchased_credit',
+					);
+
+					$total_refunded   += $amount;
+					$remaining_refund -= $amount;
+					continue;
+				}
+
 				$new_remaining = min( (float) $bucket->original_amount, (float) $bucket->remaining_amount + $amount );
 				$actual_refund = max( 0, $new_remaining - (float) $bucket->remaining_amount );
 
@@ -3977,13 +4052,11 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 					continue;
 				}
 
-				$new_status = ( $bucket->expires_at && $bucket->expires_at <= $now ) ? 'expired' : 'active';
-
 				$updated = $wpdb->update(
 					$table,
 					array(
 						'remaining_amount' => self::format_zencoin_amount( $new_remaining ),
-						'status'           => $new_status,
+						'status'           => 'active',
 						'updated_at'       => $now,
 					),
 					array( 'id' => $bucket_id ),
@@ -4005,7 +4078,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 						'balance_after'      => self::get_zencoin_bucket_balance( $user_id ),
 						'label'              => $label,
 						'related_order_id'   => $order->get_id(),
-						'related_booking_id' => ! empty( $used['related_booking_id'] ) ? absint( $used['related_booking_id'] ) : null,
+						'related_booking_id' => $related_booking_id,
 						'metadata'           => array(
 							'order_number' => $order->get_order_number(),
 							'refunded_at'  => $now,
@@ -4042,7 +4115,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			$order->add_order_note(
 				sprintf(
 					/* translators: 1: coin amount, 2: transaction id */
-					__( 'Refunded %1$s booking coins to original buckets. Wallet transaction: %2$s.', 'coin-booking-bridge' ),
+					__( 'Refunded %1$s booking coins to Zencoin buckets. Expired original buckets were converted to purchased-credit refund buckets. Wallet transaction: %2$s.', 'coin-booking-bridge' ),
 					wc_format_decimal( $total_refunded ),
 					$transaction_id ? $transaction_id : __( 'not mirrored', 'coin-booking-bridge' )
 				)
@@ -4172,6 +4245,27 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			}
 
 			return 'money_purchase';
+		}
+
+		/**
+		 * Count coin-paid booking units in the cart.
+		 *
+		 * @return int
+		 */
+		private static function get_cart_coin_booking_count() {
+			if ( ! WC()->cart ) {
+				return 0;
+			}
+
+			$count = 0;
+
+			foreach ( WC()->cart->get_cart() as $cart_item ) {
+				if ( self::is_coin_booking_cart_item( $cart_item ) ) {
+					$count += isset( $cart_item['quantity'] ) ? max( 1, absint( $cart_item['quantity'] ) ) : 1;
+				}
+			}
+
+			return (int) apply_filters( 'cbb_cart_coin_booking_count', $count, WC()->cart );
 		}
 
 		/**
