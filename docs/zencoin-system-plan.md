@@ -1074,8 +1074,8 @@ Included details:
   - `membership`
   - `package`
   - `drop_in`
+  - `free_drop_in` when the customer remains eligible
 - Current non-recovery product types in this phase:
-  - `free_drop_in`
   - `gift_card`
   - `auto_top_up`
   - any other credit product types outside the allowed recovery set
@@ -1165,7 +1165,7 @@ Context modes:
     - 0 ZC customers see an in-popup plan chooser.
     - customers missing a smaller amount see a compact buy-missing-ZC prompt.
     - choosing a recovery product adds it to cart, reloads the page with the popup open, and lands on mixed-recovery payment so the Woo Blocks Store API runtime has fresh cart state.
-    - recovery suggestions only include CBB recovery-eligible products: packages, paid drop-ins, and memberships.
+    - recovery suggestions only include CBB recovery-eligible products: packages, drop-ins, eligible free drop-in trials, and memberships.
     - the popup back arrow removes the selected recovery product and returns to the previous recovery step.
   - `coin-booking-bridge` version `0.2.21` lets mixed-recovery carts proceed to payment when projected ZC after the recovery product covers the booking cost.
 

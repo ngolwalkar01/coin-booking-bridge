@@ -2056,6 +2056,23 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		}
 
 		/**
+		 * Check whether a free drop-in trial is available for an identity.
+		 *
+		 * Incomplete identities remain visible and are validated during checkout.
+		 *
+		 * @param string $email Billing email.
+		 * @param string $phone Billing phone.
+		 * @return bool
+		 */
+		public static function is_free_dropin_trial_available( $email, $phone ) {
+			if ( ! self::has_free_trial_identity( $email, $phone ) ) {
+				return true;
+			}
+
+			return ! self::free_trial_identity_has_been_used( $email, $phone );
+		}
+
+		/**
 		 * Check whether a free trial identity has already been used.
 		 *
 		 * @param string $email            Email.
@@ -3792,7 +3809,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				'credit_products'              => array(),
 				'recovery_credit_products'     => array(),
 				'non_recovery_credit_products' => array(),
-				'allowed_recovery_product_types' => array( 'membership', 'package', 'drop_in' ),
+				'allowed_recovery_product_types' => array( 'membership', 'package', 'drop_in', 'free_drop_in' ),
 				'wallet_is_frozen'             => $user_id > 0 ? self::is_wallet_frozen_for_user( $user_id ) : false,
 				'blocking_reason'              => '',
 			);
@@ -4286,6 +4303,19 @@ if ( ! function_exists( 'cbb_render_zencoin_coin' ) ) {
 	 */
 	function cbb_render_zencoin_coin( $value = '', $args = array() ) {
 		return class_exists( 'CBB_Coin_Booking_Bridge' ) ? CBB_Coin_Booking_Bridge::render_global_zencoin_coin( $value, $args ) : '';
+	}
+}
+
+if ( ! function_exists( 'cbb_is_free_dropin_trial_available' ) ) {
+	/**
+	 * Check whether the supplied identity may claim the free drop-in trial.
+	 *
+	 * @param string $email Billing email.
+	 * @param string $phone Billing phone.
+	 * @return bool
+	 */
+	function cbb_is_free_dropin_trial_available( $email, $phone ) {
+		return class_exists( 'CBB_Coin_Booking_Bridge' ) ? CBB_Coin_Booking_Bridge::is_free_dropin_trial_available( $email, $phone ) : true;
 	}
 }
 
