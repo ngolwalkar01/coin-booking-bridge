@@ -3209,6 +3209,31 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		}
 
 		/**
+		 * Get a clear wallet label for refunded booking coins.
+		 *
+		 * @param WC_Order $order Order.
+		 * @return string
+		 */
+		private static function get_booking_refund_wallet_label( $order ) {
+			$booking_label = self::get_order_booking_product_label( $order );
+
+			if ( '' !== $booking_label ) {
+				return sprintf(
+					/* translators: %s: booking product name */
+					__( 'Coin refund cancellation of booking for "%s"', 'coin-booking-bridge' ),
+					$booking_label
+				);
+			}
+
+			return sprintf(
+				/* translators: %s: order number */
+				__( 'Coin refund cancellation of booking for order #%s', 'coin-booking-bridge' ),
+				$order instanceof WC_Order ? $order->get_order_number() : ''
+			);
+		}
+
+
+		/**
 		 * Debit booking coins after checkout order creation.
 		 *
 		 * @param int      $order_id    Order ID.
@@ -3740,7 +3765,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				return;
 			}
 
-			if ( $order->get_meta( self::META_COIN_CONSUMPTION, true ) && self::refund_order_bucket_consumption( $order, __( 'Coin refund for booking order', 'coin-booking-bridge' ), 'refund_on_time_cancel' ) ) {
+			if ( $order->get_meta( self::META_COIN_CONSUMPTION, true ) && self::refund_order_bucket_consumption( $order, self::get_booking_refund_wallet_label( $order ), 'refund_on_time_cancel' ) ) {
 				return;
 			}
 
@@ -3753,7 +3778,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				return;
 			}
 
-			self::credit_coin_refund( $order, $coins, sprintf( __( 'Coin refund for booking order #%s', 'coin-booking-bridge' ), $order->get_order_number() ) );
+			self::credit_coin_refund( $order, $coins, self::get_booking_refund_wallet_label( $order ) );
 		}
 
 		/**
@@ -3801,7 +3826,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				return;
 			}
 
-			if ( $order->get_meta( self::META_COIN_CONSUMPTION, true ) && self::refund_order_bucket_consumption( $order, sprintf( __( 'Coin refund for booking #%s', 'coin-booking-bridge' ), $booking_id ), 'refund_on_time_cancel' ) ) {
+			if ( $order->get_meta( self::META_COIN_CONSUMPTION, true ) && self::refund_order_bucket_consumption( $order, self::get_booking_refund_wallet_label( $order ), 'refund_on_time_cancel' ) ) {
 				$booking->update_meta_data( self::META_REFUND_TXN, 'bucket_refund' );
 				$booking->save();
 				return;
@@ -3816,7 +3841,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				return;
 			}
 
-			$transaction_id = self::credit_coin_refund( $order, $coins, sprintf( __( 'Coin refund for booking #%s', 'coin-booking-bridge' ), $booking_id ) );
+			$transaction_id = self::credit_coin_refund( $order, $coins, self::get_booking_refund_wallet_label( $order ) );
 
 			if ( $transaction_id ) {
 				$booking->update_meta_data( self::META_REFUND_TXN, $transaction_id );
@@ -4128,7 +4153,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			$transaction_id = self::mirror_wallet_credit(
 				$user_id,
 				$total_refunded,
-				sprintf( __( 'Coin refund for booking order #%s', 'coin-booking-bridge' ), $order->get_order_number() ),
+				self::get_booking_refund_wallet_label( $order ),
 				$order->get_currency( 'edit' )
 			);
 
