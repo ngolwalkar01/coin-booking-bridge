@@ -133,6 +133,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			add_action( 'woocommerce_checkout_order_processed', array( __CLASS__, 'store_checkout_context_on_processed_order' ), 20, 3 );
 			add_action( 'woocommerce_store_api_checkout_order_processed', array( __CLASS__, 'store_checkout_context_on_processed_order' ), 20, 1 );
 			add_action( 'woocommerce_checkout_create_order_line_item', array( __CLASS__, 'store_order_item_coin_cost' ), 20, 4 );
+			add_action( 'woocommerce_checkout_create_order_line_item', array( __CLASS__, 'store_order_item_dynamic_coin_grant' ), 25, 4 );
 			add_action( 'woocommerce_checkout_order_processed', array( __CLASS__, 'debit_order_booking_coins' ), 30, 3 );
 			add_action( 'woocommerce_store_api_checkout_order_processed', array( __CLASS__, 'debit_order_booking_coins' ), 30, 1 );
 			add_action( 'woocommerce_payment_complete', array( __CLASS__, 'debit_order_booking_coins' ), 30, 1 );
@@ -2475,6 +2476,26 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				return null;
 			}
 
+			$item_product_type = is_callable( array( $item, 'get_meta' ) ) ? sanitize_key( (string) $item->get_meta( self::META_PRODUCT_TYPE, true ) ) : '';
+			$item_amount       = is_callable( array( $item, 'get_meta' ) ) ? (float) $item->get_meta( self::META_ZC_GRANT_AMOUNT, true ) : 0.0;
+
+			if ( $item_amount > 0 && in_array( $item_product_type, array( 'package', 'drop_in', 'free_drop_in' ), true ) ) {
+				$source_label = is_callable( array( $item, 'get_meta' ) ) ? (string) $item->get_meta( self::META_SOURCE_LABEL, true ) : '';
+
+				if ( '' === $source_label ) {
+					$source_label = __( 'Member Zencoin Top-up', 'coin-booking-bridge' );
+				}
+
+				return array(
+					'product_id'       => $product_id,
+					'product_type'     => $item_product_type,
+					'amount'           => $item_amount,
+					'validity_months'  => self::get_product_grant_validity_months( $product_id, $item_product_type ),
+					'source_label'     => $source_label,
+					'package_size'     => get_post_meta( $product_id, self::META_PACKAGE_SIZE, true ),
+				);
+			}
+
 			$product_type = get_post_meta( $product_id, self::META_PRODUCT_TYPE, true );
 
 			if ( ! in_array( $product_type, array( 'package', 'drop_in', 'free_drop_in' ), true ) ) {
@@ -2498,12 +2519,12 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			}
 
 			return array(
-				'product_id'    => $product_id,
-				'product_type'  => $product_type,
-				'amount'        => $amount,
-				'validity_months' => self::get_product_grant_validity_months( $product_id, $product_type ),
-				'source_label'  => $source_label,
-				'package_size'  => get_post_meta( $product_id, self::META_PACKAGE_SIZE, true ),
+				'product_id'       => $product_id,
+				'product_type'     => $product_type,
+				'amount'           => $amount,
+				'validity_months'  => self::get_product_grant_validity_months( $product_id, $product_type ),
+				'source_label'     => $source_label,
+				'package_size'     => get_post_meta( $product_id, self::META_PACKAGE_SIZE, true ),
 			);
 		}
 
@@ -2930,6 +2951,16 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		 * @return float
 		 */
 		private static function get_item_coin_grant_amount( $item ) {
+			$order_item_amount = is_callable( array( $item, 'get_meta' ) ) ? (float) $item->get_meta( self::META_ZC_GRANT_AMOUNT, true ) : 0.0;
+
+			if ( $order_item_amount <= 0 && is_callable( array( $item, 'get_meta' ) ) ) {
+				$order_item_amount = (float) $item->get_meta( self::META_GRANT_AMOUNT, true );
+			}
+
+			if ( $order_item_amount > 0 ) {
+				return $order_item_amount;
+			}
+
 			$variation_id = method_exists( $item, 'get_variation_id' ) ? (int) $item->get_variation_id() : 0;
 
 			if ( $variation_id ) {
@@ -3161,6 +3192,36 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				$item->add_meta_data( self::META_COIN_ITEM_COST, $coin_cost, true );
 				$item->add_meta_data( __( 'Coin cost', 'coin-booking-bridge' ), wc_format_decimal( $coin_cost ), true );
 			}
+		}
+
+		/**
+		 * Store dynamic Zencoin grant data from checkout recovery cart items.
+		 *
+		 * @param WC_Order_Item_Product $item          Order item.
+		 * @param string                $cart_item_key Cart item key.
+		 * @param array                 $values        Cart item values.
+		 * @param WC_Order              $order         Order.
+		 */
+		public static function store_order_item_dynamic_coin_grant( $item, $cart_item_key, $values, $order ) {
+			$amount = isset( $values['cbb_dynamic_zencoin_grant_amount'] ) ? (float) $values['cbb_dynamic_zencoin_grant_amount'] : 0.0;
+
+			if ( $amount <= 0 ) {
+				return;
+			}
+
+			$product_type = isset( $values['cbb_dynamic_zencoin_product_type'] ) ? sanitize_key( $values['cbb_dynamic_zencoin_product_type'] ) : 'package';
+
+			if ( ! in_array( $product_type, array( 'package', 'drop_in', 'free_drop_in' ), true ) ) {
+				$product_type = 'package';
+			}
+
+			$source_label = ! empty( $values['cbb_dynamic_zencoin_source_label'] ) ? sanitize_text_field( $values['cbb_dynamic_zencoin_source_label'] ) : __( 'Member Zencoin Top-up', 'coin-booking-bridge' );
+			$amount       = self::normalize_zencoin_amount( $amount );
+
+			$item->add_meta_data( self::META_ZC_GRANT_AMOUNT, $amount, true );
+			$item->add_meta_data( self::META_PRODUCT_TYPE, $product_type, true );
+			$item->add_meta_data( self::META_SOURCE_LABEL, $source_label, true );
+			$item->add_meta_data( __( 'Zencoins granted', 'coin-booking-bridge' ), wc_format_decimal( $amount ), true );
 		}
 
 		/**
@@ -4492,6 +4553,12 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		 * @return float
 		 */
 		private static function get_cart_item_coin_grant_amount( $cart_item ) {
+			if ( ! empty( $cart_item['cbb_dynamic_zencoin_grant_amount'] ) ) {
+				$quantity = isset( $cart_item['quantity'] ) ? max( 1, (float) $cart_item['quantity'] ) : 1;
+
+				return self::normalize_zencoin_amount( (float) $cart_item['cbb_dynamic_zencoin_grant_amount'] * $quantity );
+			}
+
 			$product_id = self::get_cart_item_product_id( $cart_item );
 
 			if ( $product_id <= 0 ) {
@@ -4540,7 +4607,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		private static function build_checkout_context_credit_item( $cart_item_key, $cart_item, $allowed_types = array() ) {
 			$product    = ! empty( $cart_item['data'] ) && is_object( $cart_item['data'] ) ? $cart_item['data'] : null;
 			$product_id = self::get_cart_item_product_id( $cart_item );
-			$type       = self::get_checkout_context_credit_product_type( $product_id, $product );
+			$type       = ! empty( $cart_item['cbb_dynamic_zencoin_product_type'] ) ? sanitize_key( $cart_item['cbb_dynamic_zencoin_product_type'] ) : self::get_checkout_context_credit_product_type( $product_id, $product );
 
 			return array(
 				'cart_item_key'         => (string) $cart_item_key,
