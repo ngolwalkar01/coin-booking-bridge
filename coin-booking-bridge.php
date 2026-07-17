@@ -91,6 +91,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				add_action( 'admin_notices', array( __CLASS__, 'maybe_dependency_notice' ) );
 				add_action( 'admin_menu', array( __CLASS__, 'register_admin_menu' ) );
 				add_action( 'admin_init', array( __CLASS__, 'register_settings' ) );
+				add_action( 'admin_enqueue_scripts', array( __CLASS__, 'enqueue_admin_settings_assets' ) );
 				add_action( 'admin_post_cbb_run_zencoin_expiry', array( __CLASS__, 'handle_manual_expiry_run' ) );
 				add_action( 'woocommerce_product_options_general_product_data', array( __CLASS__, 'render_product_fields' ) );
 				add_action( 'woocommerce_process_product_meta', array( __CLASS__, 'save_product_fields' ) );
@@ -323,6 +324,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				'on_time_cancel_cutoff_hours'          => '12',
 				'wallet_freeze_on_subscription_on_hold' => 'yes',
 				'tera_wallet_mirror_enabled'           => 'yes',
+				'member_recovery_product_id'           => 0,
 				'zencoin_global_coin_enabled'          => 'yes',
 				'zencoin_tooltip'                      => __( 'Zencoins are credits used to book eligible Zenctuary experiences.', 'coin-booking-bridge' ),
 			);
@@ -411,6 +413,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				'gift_card_validity_days',
 				'newsletter_discount_validity_days',
 				'on_time_cancel_cutoff_hours',
+				'member_recovery_product_id',
 			);
 
 			foreach ( $decimal_fields as $field ) {
@@ -444,6 +447,32 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			}
 
 			return preg_replace( '/[^0-9\.\-]/', '', (string) $value );
+		}
+
+		/**
+		 * Enqueue admin assets for the Zencoin settings page.
+		 *
+		 * @param string $hook Current admin page hook.
+		 */
+		public static function enqueue_admin_settings_assets( $hook ) {
+			if ( 'woocommerce_page_cbb-zencoin-settings' !== $hook ) {
+				return;
+			}
+
+			wp_enqueue_script( 'wc-enhanced-select' );
+			wp_enqueue_style( 'woocommerce_admin_styles' );
+		}
+
+		/**
+		 * Get configured member recovery product ID.
+		 *
+		 * @return int
+		 */
+		public static function get_member_recovery_product_id() {
+			$settings   = self::get_settings();
+			$product_id = isset( $settings['member_recovery_product_id'] ) ? absint( $settings['member_recovery_product_id'] ) : 0;
+
+			return absint( apply_filters( 'cbb_member_recovery_product_id', $product_id ) );
 		}
 
 		/**
@@ -491,6 +520,12 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 						<?php self::render_number_setting_row( 'on_time_cancel_cutoff_hours', __( 'On-time cancellation cutoff (hours)', 'coin-booking-bridge' ), $settings, '1' ); ?>
 						<?php self::render_checkbox_setting_row( 'wallet_freeze_on_subscription_on_hold', __( 'Freeze wallet when membership subscription is on-hold', 'coin-booking-bridge' ), $settings ); ?>
 						<?php self::render_checkbox_setting_row( 'tera_wallet_mirror_enabled', __( 'Mirror CBB balance changes to Tera Wallet', 'coin-booking-bridge' ), $settings ); ?>
+					</table>
+
+					<h2><?php esc_html_e( 'Recovery', 'coin-booking-bridge' ); ?></h2>
+					<p><?php esc_html_e( 'Products used by checkout recovery flows when a member needs an exact Zencoin top-up.', 'coin-booking-bridge' ); ?></p>
+					<table class="form-table" role="presentation">
+						<?php self::render_product_setting_row( 'member_recovery_product_id', __( 'Member recovery product', 'coin-booking-bridge' ), $settings, __( 'Select the hidden virtual product used for dynamic member Zencoin top-ups.', 'coin-booking-bridge' ) ); ?>
 					</table>
 
 					<h2><?php esc_html_e( 'Global Zencoin Display', 'coin-booking-bridge' ); ?></h2>
@@ -1062,6 +1097,43 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 		 */
 		private static function sanitize_ledger_direction( $direction ) {
 			return in_array( $direction, array( 'credit', 'debit' ), true ) ? $direction : 'credit';
+		}
+
+		/**
+		 * Render product selector setting row.
+		 *
+		 * @param string $key         Setting key.
+		 * @param string $label       Field label.
+		 * @param array  $settings    Settings.
+		 * @param string $description Field description.
+		 */
+		private static function render_product_setting_row( $key, $label, $settings, $description = '' ) {
+			$product_id = isset( $settings[ $key ] ) ? absint( $settings[ $key ] ) : 0;
+			$product    = $product_id ? wc_get_product( $product_id ) : null;
+			$selected   = $product ? wp_strip_all_tags( $product->get_formatted_name() ) : '';
+			?>
+			<tr>
+				<th scope="row"><label for="cbb_<?php echo esc_attr( $key ); ?>"><?php echo esc_html( $label ); ?></label></th>
+				<td>
+					<select
+						id="cbb_<?php echo esc_attr( $key ); ?>"
+						name="<?php echo esc_attr( self::OPTION_SETTINGS ); ?>[<?php echo esc_attr( $key ); ?>]"
+						class="wc-product-search"
+						style="width: 350px;"
+						data-placeholder="<?php esc_attr_e( 'Search for a product...', 'coin-booking-bridge' ); ?>"
+						data-action="woocommerce_json_search_products_and_variations"
+						data-allow_clear="true"
+					>
+						<?php if ( $product_id && $selected ) : ?>
+							<option value="<?php echo esc_attr( $product_id ); ?>" selected="selected"><?php echo esc_html( $selected ); ?></option>
+						<?php endif; ?>
+					</select>
+					<?php if ( $description ) : ?>
+						<p class="description"><?php echo esc_html( $description ); ?></p>
+					<?php endif; ?>
+				</td>
+			</tr>
+			<?php
 		}
 
 		/**
@@ -2028,6 +2100,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 				$order->save_meta_data();
 			}
 		}
+
 		/**
 		 * Force WooPayments to use a SetupIntent and save the card for the free trial.
 		 *
@@ -2300,6 +2373,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 
 			return false;
 		}
+
 		/**
 		 * Check whether order customer identity has already used free trial.
 		 *
@@ -4827,6 +4901,16 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 	CBB_Coin_Booking_Bridge::init();
 }
 
+if ( ! function_exists( 'cbb_get_member_recovery_product_id' ) ) {
+	/**
+	 * Public helper for the configured member recovery product.
+	 *
+	 * @return int
+	 */
+	function cbb_get_member_recovery_product_id() {
+		return class_exists( 'CBB_Coin_Booking_Bridge' ) ? CBB_Coin_Booking_Bridge::get_member_recovery_product_id() : 0;
+	}
+}
 if ( ! function_exists( 'cbb_get_checkout_context' ) ) {
 	/**
 	 * Public helper for external UI consumers.
