@@ -1355,7 +1355,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 					<?php echo self::render_global_zencoin_coin( self::format_zencoin_display_amount( $balance ), array( 'class' => 'cbb-zencoin-wallet__coin' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
 				</section>
 
-				<a class="cbb-zencoin-wallet__topup" href="<?php echo esc_url( $topup_url ); ?>">
+				<a class="cbb-zencoin-wallet__topup" href="<?php echo esc_url( $topup_url ); ?>" data-zcf-open-checkout="choose_plan">
 					<?php esc_html_e( 'Top-Up Zencoins', 'coin-booking-bridge' ); ?>
 				</a>
 				<a class="cbb-zencoin-wallet__redeem" href="<?php echo esc_url( $redeem_url ); ?>">
