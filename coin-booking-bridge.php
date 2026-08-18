@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Coin Booking Bridge
  * Description: MVP bridge for WooCommerce Memberships, Subscriptions, Bookings, and Tera Wallet coin-based bookings.
- * Version: 0.2.26
+ * Version: 0.2.27
  * Author: Custom
  * Text Domain: coin-booking-bridge
  *
@@ -14,7 +14,7 @@ defined( 'ABSPATH' ) || exit;
 if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 	final class CBB_Coin_Booking_Bridge {
 
-		const VERSION           = '0.2.26';
+		const VERSION           = '0.2.27';
 		const DB_VERSION        = '2026050801';
 		const OPTION_DB_VERSION = 'cbb_db_version';
 		const OPTION_SETTINGS   = 'cbb_zencoin_settings';
@@ -4643,6 +4643,18 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 
 			if ( $grant_amount <= 0 ) {
 				$grant_amount = (float) get_post_meta( $product_id, self::META_GRANT_AMOUNT, true );
+			}
+
+			if ( $grant_amount <= 0 ) {
+				$parent_id = ! empty( $cart_item['product_id'] ) ? (int) $cart_item['product_id'] : 0;
+
+				if ( $parent_id > 0 && $parent_id !== $product_id ) {
+					$grant_amount = (float) get_post_meta( $parent_id, self::META_ZC_GRANT_AMOUNT, true );
+
+					if ( $grant_amount <= 0 ) {
+						$grant_amount = (float) get_post_meta( $parent_id, self::META_GRANT_AMOUNT, true );
+					}
+				}
 			}
 
 			$quantity = isset( $cart_item['quantity'] ) ? max( 1, (float) $cart_item['quantity'] ) : 1;
