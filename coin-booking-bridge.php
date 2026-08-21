@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Coin Booking Bridge
  * Description: MVP bridge for WooCommerce Memberships, Subscriptions, Bookings, and Tera Wallet coin-based bookings.
- * Version: 0.2.25
+ * Version: 0.2.26
  * Author: Custom
  * Text Domain: coin-booking-bridge
  *
@@ -14,7 +14,7 @@ defined( 'ABSPATH' ) || exit;
 if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 	final class CBB_Coin_Booking_Bridge {
 
-		const VERSION           = '0.2.25';
+		const VERSION           = '0.2.26';
 		const DB_VERSION        = '2026050801';
 		const OPTION_DB_VERSION = 'cbb_db_version';
 		const OPTION_SETTINGS   = 'cbb_zencoin_settings';
@@ -1334,7 +1334,8 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 			$balance      = self::get_available_coin_balance( $user_id );
 			$transactions = self::get_zencoin_wallet_activity( $user_id );
 			$has_activity = ! empty( $transactions );
-			$topup_url    = apply_filters( 'cbb_zencoin_wallet_topup_url', home_url( '/prices/' ) );
+			$topup_base_url = function_exists( 'wc_get_account_endpoint_url' ) ? wc_get_account_endpoint_url( 'woo-wallet' ) : home_url( '/my-account/woo-wallet/' );
+			$topup_url      = apply_filters( 'cbb_zencoin_wallet_topup_url', add_query_arg( 'zcf_open_checkout', 'topup', $topup_base_url ) );
 			$redeem_url   = apply_filters( 'cbb_zencoin_wallet_redeem_url', '#' );
 
 			?>
@@ -1355,7 +1356,7 @@ if ( ! class_exists( 'CBB_Coin_Booking_Bridge' ) ) {
 					<?php echo self::render_global_zencoin_coin( self::format_zencoin_display_amount( $balance ), array( 'class' => 'cbb-zencoin-wallet__coin' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
 				</section>
 
-				<a class="cbb-zencoin-wallet__topup" href="<?php echo esc_url( $topup_url ); ?>">
+				<a class="cbb-zencoin-wallet__topup" href="<?php echo esc_url( $topup_url ); ?>" data-zcf-open-topup>
 					<?php esc_html_e( 'Top-Up Zencoins', 'coin-booking-bridge' ); ?>
 				</a>
 				<a class="cbb-zencoin-wallet__redeem" href="<?php echo esc_url( $redeem_url ); ?>">
